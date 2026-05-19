@@ -269,6 +269,18 @@ body {
   flex: 1;
 }
 .admin-brand span { color: #d97706; font-weight: 400; letter-spacing: 1px; }
+
+.admin-clock {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1.5px;
+  color: #d97706;
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .admin-status {
   display: flex;
   align-items: center;

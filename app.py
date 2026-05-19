@@ -5,6 +5,7 @@ import uuid
 import random
 import threading
 import requests
+import pytz
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
@@ -32,6 +33,7 @@ TOKEN_FILE     = DATA_DIR / "spotify_tokens.json"
 DEVICE_FILE    = DATA_DIR / "device_id.txt"
 LAST_PLAY_FILE = DATA_DIR / "last_played.json"
 BRANDING_FILE  = DATA_DIR / "branding.json"
+SETTINGS_FILE  = DATA_DIR / "settings.json"
 JINGLES_DIR    = DATA_DIR / "jingles"
 JINGLE_META    = DATA_DIR / "jingles_meta.json"
 JINGLE_CFG     = DATA_DIR / "jingle_settings.json"
@@ -417,6 +419,47 @@ def delete_logo():
         old.unlink(missing_ok=True)
     return jsonify({"ok": True})
 
+# ── Settings helpers ──────────────────────────────────────────────────────
+
+SETTINGS_DEFAULTS = {"timezone": "Europe/Rome"}
+
+def load_settings():
+    try:
+        return {**SETTINGS_DEFAULTS, **json.loads(SETTINGS_FILE.read_text())}
+    except Exception:
+        return dict(SETTINGS_DEFAULTS)
+
+def save_settings(data):
+    SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+def get_tz_now():
+    """Return current datetime in the configured timezone."""
+    tz_name = load_settings().get("timezone", "Europe/Rome")
+    try:
+        tz = pytz.timezone(tz_name)
+        return datetime.now(tz)
+    except Exception:
+        return datetime.now()
+
+@app.route("/api/settings")
+def api_settings():
+    return jsonify(load_settings())
+
+@app.route("/admin/settings", methods=["POST"])
+@admin_required
+def admin_save_settings():
+    body = request.json or {}
+    cfg  = load_settings()
+    tz   = body.get("timezone", "").strip()
+    if tz:
+        try:
+            pytz.timezone(tz)   # validate
+            cfg["timezone"] = tz
+        except Exception:
+            return jsonify({"ok": False, "error": "Fuso orario non valido"}), 400
+    save_settings(cfg)
+    return jsonify({"ok": True})
+
 # ── Scheduler helpers ────────────────────────────────────────────────────
 
 SCHEDULE_FILE = DATA_DIR / "schedule.json"
@@ -495,7 +538,7 @@ def save_rotation(rot):
 def _jingle_active_now(j):
     if not j.get("enabled", True):
         return False
-    now = datetime.now()
+    now = get_tz_now()
     days = j.get("days") or []
     if days:
         day_keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -573,7 +616,7 @@ def _announce_due(ann):
     """Return True if this announcement should be triggered right now."""
     if not ann.get("enabled", True):
         return False
-    now = datetime.now()
+    now = get_tz_now()
     # Day-of-week filter
     days = ann.get("days") or []
     if days:
@@ -773,7 +816,7 @@ def api_announce_played(ann_id):
     meta = load_announce_meta()
     for ann in meta:
         if ann["id"] == ann_id:
-            ann["last_played_at"] = datetime.now().isoformat()
+            ann["last_played_at"] = get_tz_now().isoformat()
             break
     save_announce_meta(meta)
     return jsonify({"ok": True})
@@ -882,10 +925,11 @@ def admin():
     branding      = load_branding()
     schedule      = load_schedule()
     announcements = load_announce_meta()
+    settings      = load_settings()
     return render_template("admin.html",
                            jingles=jingles, jingle_cfg=jingle_cfg,
                            branding=branding, schedule=schedule,
-                           announcements=announcements)
+                           announcements=announcements, settings=settings)
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():

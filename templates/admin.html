@@ -10,6 +10,7 @@
 
 <div class="admin-header">
   <div class="admin-brand">OUTLAND RADIO <span>Admin</span></div>
+  <div class="admin-clock" id="adminClock">--:--:--</div>
   <div class="admin-status">
     <span class="status-dot" id="statusDot"></span>
     <span id="nowPlayingHeader">Caricamento&hellip;</span>
@@ -19,6 +20,50 @@
 </div>
 
 <div class="admin-main">
+
+  <!-- Impostazioni sistema -->
+  <div class="card">
+    <div class="card-head">
+      <h3>Impostazioni di Sistema</h3>
+      <span class="card-hint">Fuso orario usato per jingle e annunci</span>
+    </div>
+    <div class="card-body">
+      <div class="ctrl-row">
+        <label class="ctrl-label">Fuso orario</label>
+        <select id="tzSelect" class="input-number" style="flex:1;max-width:280px"
+                onchange="saveTimezone(this.value)">
+          <optgroup label="Europa">
+            <option value="Europe/Rome"          {% if settings.timezone == 'Europe/Rome'          %}selected{% endif %}>Italia (Europe/Rome)</option>
+            <option value="Europe/London"        {% if settings.timezone == 'Europe/London'        %}selected{% endif %}>Regno Unito (Europe/London)</option>
+            <option value="Europe/Paris"         {% if settings.timezone == 'Europe/Paris'         %}selected{% endif %}>Francia (Europe/Paris)</option>
+            <option value="Europe/Berlin"        {% if settings.timezone == 'Europe/Berlin'        %}selected{% endif %}>Germania (Europe/Berlin)</option>
+            <option value="Europe/Madrid"        {% if settings.timezone == 'Europe/Madrid'        %}selected{% endif %}>Spagna (Europe/Madrid)</option>
+            <option value="Europe/Amsterdam"     {% if settings.timezone == 'Europe/Amsterdam'     %}selected{% endif %}>Olanda (Europe/Amsterdam)</option>
+            <option value="Europe/Lisbon"        {% if settings.timezone == 'Europe/Lisbon'        %}selected{% endif %}>Portogallo (Europe/Lisbon)</option>
+            <option value="Europe/Athens"        {% if settings.timezone == 'Europe/Athens'        %}selected{% endif %}>Grecia (Europe/Athens)</option>
+            <option value="Europe/Warsaw"        {% if settings.timezone == 'Europe/Warsaw'        %}selected{% endif %}>Polonia (Europe/Warsaw)</option>
+            <option value="Europe/Stockholm"     {% if settings.timezone == 'Europe/Stockholm'     %}selected{% endif %}>Svezia (Europe/Stockholm)</option>
+          </optgroup>
+          <optgroup label="Americhe">
+            <option value="America/New_York"     {% if settings.timezone == 'America/New_York'     %}selected{% endif %}>New York (EST/EDT)</option>
+            <option value="America/Chicago"      {% if settings.timezone == 'America/Chicago'      %}selected{% endif %}>Chicago (CST/CDT)</option>
+            <option value="America/Los_Angeles"  {% if settings.timezone == 'America/Los_Angeles'  %}selected{% endif %}>Los Angeles (PST/PDT)</option>
+            <option value="America/Sao_Paulo"    {% if settings.timezone == 'America/Sao_Paulo'    %}selected{% endif %}>São Paulo (BRT)</option>
+          </optgroup>
+          <optgroup label="Asia / Medio Oriente">
+            <option value="Asia/Dubai"           {% if settings.timezone == 'Asia/Dubai'           %}selected{% endif %}>Dubai (GST)</option>
+            <option value="Asia/Kolkata"         {% if settings.timezone == 'Asia/Kolkata'         %}selected{% endif %}>India (IST)</option>
+            <option value="Asia/Singapore"       {% if settings.timezone == 'Asia/Singapore'       %}selected{% endif %}>Singapore (SGT)</option>
+            <option value="Asia/Tokyo"           {% if settings.timezone == 'Asia/Tokyo'           %}selected{% endif %}>Giappone (JST)</option>
+          </optgroup>
+          <optgroup label="Altro">
+            <option value="UTC"                  {% if settings.timezone == 'UTC'                  %}selected{% endif %}>UTC</option>
+          </optgroup>
+        </select>
+        <span class="card-hint" id="tzHint">Ora attuale: <strong id="tzNow">—</strong></span>
+      </div>
+    </div>
+  </div>
 
   <!-- In onda ora -->
   <div class="card">
@@ -488,6 +533,50 @@
 </div><!-- /admin-main -->
 
 <script>
+// ── Clock & Timezone ───────────────────────────────────────────────────
+
+let adminTz = '{{ settings.timezone }}';
+
+(function startClock() {
+  const headerEl = document.getElementById('adminClock');
+  const cardEl   = document.getElementById('tzNow');
+
+  const hFmt = new Intl.DateTimeFormat('it-IT', {
+    timeZone: adminTz,
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+  const cFmt = new Intl.DateTimeFormat('it-IT', {
+    timeZone: adminTz,
+    weekday: 'short', day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+
+  function tick() {
+    const now = new Date();
+    if (headerEl) headerEl.textContent = hFmt.format(now);
+    if (cardEl)   cardEl.textContent   = cFmt.format(now);
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+
+async function saveTimezone(tz) {
+  adminTz = tz;
+  try {
+    const r = await fetch('/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone: tz }),
+    });
+    const d = await r.json();
+    showToast(d.ok ? 'Fuso orario salvato' : (d.error || 'Errore'), d.ok);
+  } catch(e) {
+    showToast('Errore di rete', false);
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function escH(s) {
