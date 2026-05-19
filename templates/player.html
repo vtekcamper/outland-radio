@@ -233,14 +233,15 @@ setInterval(pollNowPlaying, 15000);
 
 // ── Jingle engine ──────────────────────────────────────────────────────
 
-let jingleCfg       = { enabled: true, every_n_songs: 3, every_n_minutes: 0 };
-let songCount       = 0;
-let jinglePlaying   = false;
-let minuteTimer     = null;
+let jingleCfg     = { enabled: true, every_n_songs: 3, every_n_minutes: 0,
+                      rotation_mode: 'no_repeat', crossfade_ms: 1500 };
+let songCount     = 0;
+let jinglePlaying = false;
+let minuteTimer   = null;
 
 async function loadJingleCfg() {
   try {
-    const r = await fetch('/api/jingles/settings');
+    const r  = await fetch('/api/jingles/settings');
     jingleCfg = await r.json();
     startMinuteTimer();
   } catch(e) {}
@@ -248,18 +249,15 @@ async function loadJingleCfg() {
 
 function startMinuteTimer() {
   clearInterval(minuteTimer);
-  if (jingleCfg.enabled && jingleCfg.every_n_minutes > 0) {
+  if (jingleCfg.enabled && jingleCfg.every_n_minutes > 0)
     minuteTimer = setInterval(triggerJingle, jingleCfg.every_n_minutes * 60 * 1000);
-  }
 }
 
-// Called from player_state_changed when a new track starts
 function onTrackChange() {
   songCount++;
   if (jingleCfg.enabled && jingleCfg.every_n_songs > 0 &&
       songCount >= jingleCfg.every_n_songs) {
     songCount = 0;
-    // Small delay so the new track has time to start before we pause
     setTimeout(triggerJingle, 1500);
   }
 }
@@ -274,38 +272,105 @@ async function triggerJingle() {
   } catch(e) {}
 }
 
-function playJingle(url, name) {
+// ── Crossfade engine ────────────────────────────────────────────────────
+
+// Smooth volume animation: ease-in-out curve, uses requestAnimationFrame
+function animateVol(getV, setV, target, ms) {
+  return new Promise(resolve => {
+    if (ms <= 0) { setV(target); return resolve(); }
+    const start = getV();
+    const t0    = performance.now();
+    const ease  = t => t < .5 ? 2*t*t : -1+(4-2*t)*t;
+    const tick  = () => {
+      const p = Math.min((performance.now()-t0) / ms, 1);
+      setV(Math.max(0, Math.min(1, start + (target-start) * ease(p))));
+      p < 1 ? requestAnimationFrame(tick) : resolve();
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function playJingle(url, name) {
+  if (jinglePlaying) return;
   jinglePlaying = true;
 
-  // Show jingle UI
+  const fade      = jingleCfg.crossfade_ms ?? 1500;
+  const targetVol = document.getElementById('volumeSlider').value / 100;
   const prevTitle  = document.getElementById('trackTitle').textContent;
   const prevArtist = document.getElementById('trackArtist').textContent;
-  document.getElementById('trackTitle').textContent  = name || 'Outland Radio';
-  document.getElementById('trackArtist').textContent = '— Jingle —';
-
-  // Pause Spotify
-  if (player) player.pause();
 
   const audio = new Audio(url);
-  audio.volume = document.getElementById('volumeSlider').value / 100;
 
-  audio.addEventListener('ended', () => {
-    jinglePlaying = false;
-    // Restore previous track info briefly, then SDK state will update it
+  // ── Phase 1: fade out Spotify, fade in jingle simultaneously ──────────
+  if (fade > 0 && player) {
+    audio.volume = 0;
+    let sdkVol   = targetVol;
+
+    const started = await audio.play().then(() => true).catch(() => false);
+    if (!started) { jinglePlaying = false; return; }
+
+    await Promise.all([
+      // Spotify fades to 0
+      animateVol(() => sdkVol,        v => { sdkVol = v;        player.setVolume(v); }, 0,         fade),
+      // Jingle fades in to target
+      animateVol(() => audio.volume,  v => { audio.volume = v;  },                      targetVol, fade),
+    ]);
+    player.pause();                    // already at vol 0 — inaudible
+    player.setVolume(targetVol);       // restore SDK vol for when it resumes
+
+  } else {
+    // No crossfade — hard cut
+    audio.volume = targetVol;
+    if (player) player.pause();
+    const started = await audio.play().then(() => true).catch(() => false);
+    if (!started) { jinglePlaying = false; if (player) player.resume(); return; }
+  }
+
+  document.getElementById('trackTitle').textContent  = name || 'Outland Radio';
+  document.getElementById('trackArtist').textContent  = '— Jingle —';
+
+  // ── Phase 2: near end of jingle, crossfade back to Spotify ────────────
+  let handledEnd = false;
+  const restoreSpotify = async (force = false) => {
+    if (handledEnd) return;
+    handledEnd = true;
+
+    if (fade > 0 && player) {
+      let sdkVol2 = 0;
+      player.setVolume(0);
+      await player.resume();
+      await Promise.all([
+        // Jingle fades out
+        animateVol(() => audio.volume, v => { audio.volume = v; }, 0,         fade * 0.9),
+        // Spotify fades in (slight delay for natural feel)
+        (async () => {
+          await new Promise(r => setTimeout(r, fade * 0.15));
+          await animateVol(() => sdkVol2, v => { sdkVol2 = v; player.setVolume(v); }, targetVol, fade * 0.85);
+        })(),
+      ]);
+    } else {
+      if (player) { await player.resume(); player.setVolume(targetVol); }
+    }
+
     document.getElementById('trackTitle').textContent  = prevTitle;
-    document.getElementById('trackArtist').textContent = prevArtist;
-    // Resume Spotify
-    if (player) player.resume();
-  });
+    document.getElementById('trackArtist').textContent  = prevArtist;
+    jinglePlaying = false;
+  };
 
+  // Start fade-out when remaining time ≤ fade duration
+  audio.addEventListener('timeupdate', () => {
+    if (!handledEnd && isFinite(audio.duration) && audio.duration > 0) {
+      const remaining = (audio.duration - audio.currentTime) * 1000;
+      if (remaining <= fade + 80) restoreSpotify();
+    }
+  });
+  audio.addEventListener('ended', () => restoreSpotify());
   audio.addEventListener('error', () => {
+    handledEnd = true;
     jinglePlaying = false;
-    if (player) player.resume();
-  });
-
-  audio.play().catch(() => {
-    jinglePlaying = false;
-    if (player) player.resume();
+    if (player) { player.resume(); player.setVolume(targetVol); }
+    document.getElementById('trackTitle').textContent  = prevTitle;
+    document.getElementById('trackArtist').textContent  = prevArtist;
   });
 }
 

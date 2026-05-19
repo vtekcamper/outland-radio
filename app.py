@@ -457,7 +457,7 @@ def save_jingle_meta(meta):
 
 def load_jingle_cfg():
     defaults = {"enabled": True, "every_n_songs": 3, "every_n_minutes": 0,
-                "rotation_mode": "no_repeat"}
+                "rotation_mode": "no_repeat", "crossfade_ms": 1500}
     try:
         return {**defaults, **json.loads(JINGLE_CFG.read_text())}
     except Exception:
@@ -663,13 +663,14 @@ def save_jingle_settings():
     new_mode = body.get("rotation_mode")
     if new_mode and new_mode in ("random", "no_repeat", "sequential", "weighted"):
         cfg["rotation_mode"] = new_mode
-        # Reset rotation state on mode change
         with _rotation_lock:
             rot = load_rotation()
             rot["seq_index"]  = 0
             rot["played_ids"] = []
             rot["last_id"]    = None
             save_rotation(rot)
+    if "crossfade_ms" in body:
+        cfg["crossfade_ms"] = max(0, min(5000, int(body["crossfade_ms"])))
     save_jingle_cfg(cfg)
     return jsonify({"ok": True})
 
