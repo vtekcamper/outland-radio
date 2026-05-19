@@ -219,7 +219,7 @@ def search_playlists():
     r = requests.get(
         "https://api.spotify.com/v1/search",
         headers={"Authorization": f"Bearer {token}"},
-        params={"q": q, "type": "playlist", "limit": 50},
+        params={"q": q, "type": "playlist", "limit": 20},
     )
     app.logger.info("Spotify search status: %s", r.status_code)
     if r.status_code != 200:
