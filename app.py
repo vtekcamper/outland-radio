@@ -218,17 +218,17 @@ def search_playlists():
     r = requests.get(
         "https://api.spotify.com/v1/search",
         headers={"Authorization": f"Bearer {token}"},
-        params={"q": q, "type": "playlist", "limit": 24, "market": "IT"},
+        params={"q": q, "type": "playlist", "limit": 50},
     )
     data = r.json() if r.status_code == 200 else {}
-    items = (data or {}).get("playlists", {}).get("items", [])
+    items = [p for p in (data or {}).get("playlists", {}).get("items", []) if p]
     return jsonify([{
         "name":        p.get("name", ""),
         "uri":         p.get("uri", ""),
         "image":       (p.get("images") or [{}])[0].get("url", ""),
         "owner":       p.get("owner", {}).get("display_name", ""),
         "track_count": (p.get("tracks") or {}).get("total", 0),
-    } for p in items if p])
+    } for p in items[:24]])
 
 @app.route("/api/debug/search")
 def api_debug_search():
@@ -237,7 +237,7 @@ def api_debug_search():
     r = requests.get(
         "https://api.spotify.com/v1/search",
         headers={"Authorization": f"Bearer {token}"},
-        params={"q": q, "type": "playlist", "limit": 5, "market": "IT"},
+        params={"q": q, "type": "playlist", "limit": 5},
     )
     return jsonify({"status": r.status_code, "raw": r.json()})
 
