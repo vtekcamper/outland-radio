@@ -10,7 +10,7 @@ body {
 /* ── PLAYER PAGE ────────────────────────────────────────────────────── */
 
 .player-body {
-  background: linear-gradient(160deg, #1c2b33 0%, #0f1c22 100%);
+  background: linear-gradient(160deg, var(--color-bg, #1c2b33) 0%, var(--color-bg-dark, #0f1c22) 100%);
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -38,7 +38,7 @@ body {
 .logo-mark {
   width: 56px;
   height: 56px;
-  background: #d97706;
+  background: var(--color-primary, #d97706);
   border-radius: 14px;
   display: flex;
   align-items: center;
@@ -48,7 +48,7 @@ body {
   color: #fff;
   letter-spacing: 1px;
   flex-shrink: 0;
-  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.35);
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
 }
 
 .player-brand-text {
@@ -59,7 +59,7 @@ body {
 .brand-name {
   font-size: 20px;
   font-weight: 800;
-  color: #f9fafb;
+  color: var(--color-text, #f9fafb);
   letter-spacing: 3px;
 }
 .brand-sub {
@@ -101,7 +101,7 @@ body {
 }
 .bar {
   width: 4px;
-  background: #d97706;
+  background: var(--color-primary, #d97706);
   border-radius: 2px;
   height: 6px;
   transition: height 0.1s;
@@ -128,14 +128,14 @@ body {
 .now-playing-label {
   font-size: 10px;
   letter-spacing: 2.5px;
-  color: #d97706;
+  color: var(--color-primary, #d97706);
   font-weight: 700;
   margin-bottom: 10px;
 }
 .track-title {
   font-size: 22px;
   font-weight: 700;
-  color: #f9fafb;
+  color: var(--color-text, #f9fafb);
   line-height: 1.3;
   margin-bottom: 6px;
   white-space: nowrap;
@@ -158,7 +158,7 @@ body {
 }
 .progress-fill {
   height: 100%;
-  background: #d97706;
+  background: var(--color-primary, #d97706);
   border-radius: 2px;
   width: 0%;
   transition: width 0.9s linear;
@@ -192,7 +192,7 @@ body {
 .btn-play {
   width: 76px;
   height: 76px;
-  background: #d97706;
+  background: var(--color-primary, #d97706);
   border: none;
   border-radius: 50%;
   color: #fff;
@@ -201,10 +201,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, transform 0.1s;
-  box-shadow: 0 8px 24px rgba(217,119,6,.4);
+  transition: filter 0.2s, transform 0.1s;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
 }
-.btn-play:hover  { background: #b45309; }
+.btn-play:hover  { filter: brightness(0.85); }
 .btn-play:active { transform: scale(0.95); }
 
 /* Volume */
@@ -228,7 +228,7 @@ body {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
-  background: #d97706;
+  background: var(--color-primary, #d97706);
   border-radius: 50%;
   cursor: pointer;
   transition: transform 0.1s;

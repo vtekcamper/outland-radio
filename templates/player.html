@@ -311,14 +311,19 @@ async function applyBranding() {
   try {
     const r = await fetch('/api/branding');
     const b = await r.json();
-    document.getElementById('brandName').textContent = b.store_name    || 'OUTLAND RADIO';
+    document.getElementById('brandName').textContent = b.store_name     || 'OUTLAND RADIO';
     document.getElementById('brandSub').textContent  = b.store_subtitle || '';
-    const initials = (b.store_name || 'OR').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const initials = (b.store_name || 'OR').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
     document.getElementById('brandMark').textContent = initials;
     const root = document.documentElement;
     root.style.setProperty('--color-primary', b.primary_color || '#d97706');
-    root.style.setProperty('--color-bg',      b.bg_color      || '#1c2b33');
     root.style.setProperty('--color-text',    b.text_color    || '#f0f4f5');
+    // Compute a darker shade of bg for the gradient
+    const bg = b.bg_color || '#1c2b33';
+    root.style.setProperty('--color-bg', bg);
+    const hex2n = h => parseInt(h.replace('#','').slice(0,2),16);
+    const dark = `rgb(${Math.floor(hex2n(bg)*0.6)},${Math.floor(hex2n(bg.replace('#','').slice(2,4))*0.6)},${Math.floor(hex2n(bg.replace('#','').slice(4,6))*0.6)})`;
+    root.style.setProperty('--color-bg-dark', dark);
   } catch(e) {}
 }
 
