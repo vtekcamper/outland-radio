@@ -19,7 +19,7 @@ export default async function adminRoutes(fastify) {
   // ── Auth ──────────────────────────────────────────────────────────────────
   fastify.get('/admin/login', async (req, reply) => {
     const error = req.query.error ? 'Password errata' : null;
-    reply.view('admin_login.html', { error });
+    return reply.view('admin_login.html', { error });
   });
 
   fastify.post('/admin/login', async (req, reply) => {
@@ -38,7 +38,7 @@ export default async function adminRoutes(fastify) {
 
   // ── Admin panel ───────────────────────────────────────────────────────────
   fastify.get('/admin', { preHandler: fastify.adminGuard }, async (req, reply) => {
-    reply.view('admin.html', {
+    return reply.view('admin.html', {
       jingles:       loadJingles(),
       jingle_cfg:    loadJingleCfg(),
       branding:      loadBranding(),

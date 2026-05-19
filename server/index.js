@@ -104,7 +104,7 @@ await fastify.register(eventsRoutes);
 // ── Player ─────────────────────────────────────────────────────────────────
 fastify.get('/', async (req, reply) => {
   if (!(await isAuthenticated())) return reply.redirect('/auth');
-  reply.view('player.html', { branding: loadBranding() });
+  return reply.view('player.html', { branding: loadBranding() });
 });
 
 // ── Health ─────────────────────────────────────────────────────────────────
