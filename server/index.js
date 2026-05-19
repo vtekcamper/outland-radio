@@ -28,8 +28,9 @@ const ROOT      = join(__dirname, '..');
 
 // ── Fastify ────────────────────────────────────────────────────────────────
 const fastify = Fastify({
-  logger: { level: process.env.LOG_LEVEL || 'info' },
-  bodyLimit: 110 * 1024 * 1024,   // 110 MB for audio uploads
+  logger:               { level: process.env.LOG_LEVEL || 'info' },
+  bodyLimit:            110 * 1024 * 1024,   // 110 MB for audio uploads
+  ignoreTrailingSlash:  true,                // /admin and /admin/ treated as the same route
 });
 
 // ── Plugins ────────────────────────────────────────────────────────────────
