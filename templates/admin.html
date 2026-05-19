@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outland Radio &mdash; Admin</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="admin-body">
+
+<div class="admin-header">
+  <div class="admin-brand">OUTLAND RADIO <span>Admin</span></div>
+  <div class="admin-status">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="nowPlayingHeader">Caricamento&hellip;</span>
+  </div>
+  <a href="/admin/logout" class="btn btn-sm btn-secondary">Esci</a>
+  <a href="/" class="btn btn-sm btn-primary" target="_blank">Player &#8599;</a>
+</div>
+
+<div class="admin-main">
+
+  <!-- In onda ora -->
+  <div class="card">
+    <div class="card-head"><h3>In onda ora</h3></div>
+    <div class="card-body">
+      <div class="now-playing-admin">
+        <img id="adminArt" src="" alt="" class="admin-art" style="display:none">
+        <div class="admin-art admin-art-empty" id="adminArtEmpty">&#9835;</div>
+        <div class="np-text">
+          <div class="np-title" id="adminTitle">Nessuna riproduzione</div>
+          <div class="np-artist" id="adminArtist">&mdash;</div>
+        </div>
+      </div>
+      <div class="controls-row">
+        <button class="btn btn-secondary" onclick="ctrlApi('prev')" title="Precedente">&#9664;&#9664; Indietro</button>
+        <button class="btn btn-secondary" onclick="ctrlApi('pause')" title="Pausa/Riprendi">&#9646;&#9646; Pausa</button>
+        <button class="btn btn-primary"   onclick="ctrlApi('next')"  title="Successivo">&#9654;&#9654; Skip</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Volume + Shuffle -->
+  <div class="card">
+    <div class="card-head"><h3>Controlli audio</h3></div>
+    <div class="card-body">
+      <div class="ctrl-row">
+        <label class="ctrl-label">Volume</label>
+        <div class="volume-wrap">
+          <span class="vol-icon">&#128264;</span>
+          <input type="range" id="adminVolume" min="0" max="100" value="80"
+                 class="volume-slider" oninput="setVol(this.value)">
+          <span class="vol-icon">&#128266;</span>
+          <span class="vol-val" id="volLabel">80%</span>
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <label class="ctrl-label">Shuffle</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="shuffleToggle" checked onchange="setShuffle(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-hint" id="shuffleHint">Attivo</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jingle -->
+  <div class="card">
+    <div class="card-head">
+      <h3>Jingle Personalizzati</h3>
+      <span class="card-hint">Suonano automaticamente tra i brani</span>
+    </div>
+    <div class="card-body">
+
+      <!-- Schedule settings -->
+      <div class="jingle-settings">
+        <div class="ctrl-row">
+          <label class="ctrl-label">Attivi</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="jingleEnabled"
+                   {% if jingle_cfg.enabled %}checked{% endif %}
+                   onchange="saveJingleSettings()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-hint" id="jingleEnabledHint">
+            {% if jingle_cfg.enabled %}Sì{% else %}No{% endif %}
+          </span>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-label">Ogni</label>
+          <div class="jingle-freq">
+            <input type="number" id="jingleEveryN" min="1" max="20"
+                   value="{{ jingle_cfg.every_n_songs }}"
+                   class="input-number" onchange="saveJingleSettings()">
+            <span class="freq-label">brani</span>
+          </div>
+          <span class="card-hint">0 = disabilitato per brani</span>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-label">Oppure ogni</label>
+          <div class="jingle-freq">
+            <input type="number" id="jingleEveryMin" min="0" max="120"
+                   value="{{ jingle_cfg.every_n_minutes }}"
+                   class="input-number" onchange="saveJingleSettings()">
+            <span class="freq-label">minuti</span>
+          </div>
+          <span class="card-hint">0 = solo per brani</span>
+        </div>
+      </div>
+
+      <!-- Upload zone -->
+      <div class="upload-zone" id="jingleUploadZone">
+        <input type="file" id="jingleFileInput" accept=".mp3,.wav,.ogg,.m4a"
+               multiple onchange="uploadJingles(this.files)" style="display:none">
+        <div onclick="document.getElementById('jingleFileInput').click()">
+          <div class="upload-icon">&#127897;</div>
+          <p>Clicca o trascina jingle MP3/WAV</p>
+          <p class="upload-sub">Il jingle viene inserito automaticamente tra i brani</p>
+        </div>
+      </div>
+      <div id="jingleUploadMsg"></div>
+
+      <!-- Jingle list -->
+      <div class="jingle-list" id="jingleList">
+        {% for j in jingles %}
+        <div class="jingle-item {% if not j.enabled %}jingle-disabled{% endif %}" data-id="{{ j.id }}">
+          <span class="jingle-icon">&#127897;</span>
+          <input class="jingle-name-input" value="{{ j.name }}"
+                 onchange="renameJingle('{{ j.id }}', this.value)">
+          <div class="jingle-actions">
+            <button class="btn btn-sm {% if j.enabled %}btn-warning{% else %}btn-success{% endif %}"
+                    onclick="toggleJingle('{{ j.id }}', this)">
+              {% if j.enabled %}Disabilita{% else %}Abilita{% endif %}
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="deleteJingle('{{ j.id }}', this)">Elimina</button>
+          </div>
+        </div>
+        {% endfor %}
+        {% if not jingles %}
+        <p class="empty-state" id="jingleEmpty">Nessun jingle caricato.</p>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Playlist -->
+  <div class="card">
+    <div class="card-head">
+      <h3>Playlist Spotify</h3>
+      <span class="card-hint">Clicca per trasmettere</span>
+    </div>
+    <div class="card-body">
+      <p class="card-note">
+        Le playlist vengono prese direttamente dal tuo account Spotify.
+        Per aggiungerne di nuove, creale su Spotify e ricarica questa pagina.
+      </p>
+      <div class="playlist-grid" id="playlistGrid">
+        {% for p in playlists %}
+        <div class="playlist-card" data-uri="{{ p.uri }}" onclick="playPlaylist('{{ p.uri }}', this)">
+          {% if p.images %}
+          <img src="{{ p.images[0].url }}" alt="{{ p.name }}" class="pl-img">
+          {% else %}
+          <div class="pl-img pl-img-empty">&#9835;</div>
+          {% endif %}
+          <div class="pl-info">
+            <div class="pl-name">{{ p.name }}</div>
+            <div class="pl-tracks">{{ p.tracks.total }} brani</div>
+          </div>
+        </div>
+        {% endfor %}
+        {% if not playlists %}
+        <p class="empty-state">Nessuna playlist trovata sul tuo account Spotify.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div><!-- /admin-main -->
+
+<script>
+// ── Playback control ───────────────────────────────────────────────────
+
+async function playPlaylist(uri, el) {
+  document.querySelectorAll('.playlist-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const r = await fetch('/api/play', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ context_uri: uri }),
+  });
+  const d = await r.json();
+  if (!d.ok) {
+    alert('Errore: assicurati che il player sia aperto nel browser del negozio (scheda /).');
+    el.classList.remove('active');
+  } else {
+    setTimeout(updateNowPlaying, 1000);
+  }
+}
+
+async function ctrlApi(action) {
+  await fetch(`/api/${action}`, { method: 'POST' });
+  setTimeout(updateNowPlaying, 600);
+}
+
+async function setVol(v) {
+  document.getElementById('volLabel').textContent = v + '%';
+  await fetch('/api/volume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ volume_percent: parseInt(v) }),
+  });
+}
+
+async function setShuffle(enabled) {
+  document.getElementById('shuffleHint').textContent = enabled ? 'Attivo' : 'Disattivo';
+  await fetch('/api/shuffle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state: enabled }),
+  });
+}
+
+// ── Now playing poll ───────────────────────────────────────────────────
+
+async function updateNowPlaying() {
+  try {
+    const r = await fetch('/api/now-playing');
+    const d = await r.json();
+
+    if (d.playing && d.title) {
+      document.getElementById('adminTitle').textContent      = d.title;
+      document.getElementById('adminArtist').textContent     = d.artist || d.album || '—';
+      document.getElementById('nowPlayingHeader').textContent = `${d.title} · ${d.artist}`;
+      document.getElementById('statusDot').className          = 'status-dot status-live';
+      if (d.image) {
+        const img = document.getElementById('adminArt');
+        img.src           = d.image;
+        img.style.display = 'block';
+        document.getElementById('adminArtEmpty').style.display = 'none';
+      }
+    } else {
+      document.getElementById('nowPlayingHeader').textContent = 'In pausa';
+      document.getElementById('statusDot').className          = 'status-dot status-off';
+      document.getElementById('adminTitle').textContent       = 'Nessuna riproduzione';
+      document.getElementById('adminArtist').textContent      = '—';
+    }
+  } catch(e) {
+    document.getElementById('statusDot').className = 'status-dot';
+  }
+}
+
+updateNowPlaying();
+setInterval(updateNowPlaying, 6000);
+
+// ── Jingle management ──────────────────────────────────────────────────
+
+async function uploadJingles(files) {
+  const msg = document.getElementById('jingleUploadMsg');
+  for (const file of files) {
+    msg.innerHTML = `<p>Caricamento <strong>${file.name}</strong>...</p>`;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await fetch('/admin/jingles/upload', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.ok) {
+        msg.innerHTML = `<p class="ok">✓ "${d.name}" caricato con successo</p>`;
+        addJingleToList(d);
+        document.getElementById('jingleEmpty')?.remove();
+      } else {
+        msg.innerHTML = `<p class="err">Errore: ${d.error}</p>`;
+      }
+    } catch(e) {
+      msg.innerHTML = `<p class="err">Errore di rete</p>`;
+    }
+  }
+}
+
+function addJingleToList(j) {
+  const list = document.getElementById('jingleList');
+  const div  = document.createElement('div');
+  div.className  = 'jingle-item';
+  div.dataset.id = j.id;
+  div.innerHTML  = `
+    <span class="jingle-icon">&#127897;</span>
+    <input class="jingle-name-input" value="${j.name}"
+           onchange="renameJingle('${j.id}', this.value)">
+    <div class="jingle-actions">
+      <button class="btn btn-sm btn-warning" onclick="toggleJingle('${j.id}', this)">Disabilita</button>
+      <button class="btn btn-sm btn-danger"  onclick="deleteJingle('${j.id}', this)">Elimina</button>
+    </div>`;
+  list.appendChild(div);
+}
+
+async function toggleJingle(id, btn) {
+  await fetch(`/admin/jingles/${id}/toggle`, { method: 'POST' });
+  const item    = btn.closest('.jingle-item');
+  const enabled = item.classList.toggle('jingle-disabled');
+  // classList.toggle returns true if class was added (= now disabled)
+  btn.textContent  = enabled ? 'Abilita' : 'Disabilita';
+  btn.className    = `btn btn-sm ${enabled ? 'btn-success' : 'btn-warning'}`;
+}
+
+async function deleteJingle(id, btn) {
+  if (!confirm('Eliminare questo jingle?')) return;
+  await fetch(`/admin/jingles/${id}/delete`, { method: 'POST' });
+  btn.closest('.jingle-item').remove();
+}
+
+async function renameJingle(id, name) {
+  await fetch(`/admin/jingles/${id}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+async function saveJingleSettings() {
+  const enabled   = document.getElementById('jingleEnabled').checked;
+  const everyN    = parseInt(document.getElementById('jingleEveryN').value)   || 3;
+  const everyMin  = parseInt(document.getElementById('jingleEveryMin').value) || 0;
+  document.getElementById('jingleEnabledHint').textContent = enabled ? 'Sì' : 'No';
+  await fetch('/admin/jingles/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, every_n_songs: everyN, every_n_minutes: everyMin }),
+  });
+}
+
+// Drag-drop upload for jingles
+const jingleZone = document.getElementById('jingleUploadZone');
+jingleZone.addEventListener('dragover', e => { e.preventDefault(); jingleZone.classList.add('drag-over'); });
+jingleZone.addEventListener('dragleave', ()  => jingleZone.classList.remove('drag-over'));
+jingleZone.addEventListener('drop', e => {
+  e.preventDefault();
+  jingleZone.classList.remove('drag-over');
+  uploadJingles(e.dataTransfer.files);
+});
+</script>
+</body>
+</html>

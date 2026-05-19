@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Outland Radio</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="player-body">
+
+<div class="player-wrap">
+
+  <!-- Branding -->
+  <div class="player-brand">
+    <div class="logo-mark">OR</div>
+    <div class="player-brand-text">
+      <span class="brand-name">OUTLAND RADIO</span>
+      <span class="brand-sub">Outland Store &middot; Accessori Camper</span>
+    </div>
+  </div>
+
+  <!-- Album art -->
+  <div class="album-art-wrap">
+    <img id="albumImage" src="" alt="" style="display:none">
+    <div class="album-placeholder" id="albumPlaceholder">&#9835;</div>
+  </div>
+
+  <!-- Waveform -->
+  <div class="waveform" id="waveform">
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+  </div>
+
+  <!-- Now playing -->
+  <div class="now-playing">
+    <div class="now-playing-label">IN ONDA ORA</div>
+    <div class="track-title" id="trackTitle">Connessione in corso&hellip;</div>
+    <div class="track-artist" id="trackArtist"></div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap">
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-times">
+      <span id="progressTime">0:00</span>
+      <span id="durationTime">0:00</span>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn-ctrl" id="btnPrev" title="Precedente">&#9664;&#9664;</button>
+    <button class="btn-play" id="playBtn" onclick="togglePlay()">
+      <span id="playIcon">&#9654;</span>
+    </button>
+    <button class="btn-ctrl" id="btnNext" title="Successivo">&#9654;&#9654;</button>
+  </div>
+
+  <!-- Volume -->
+  <div class="volume-wrap">
+    <span class="vol-icon">&#128264;</span>
+    <input type="range" id="volumeSlider" min="0" max="100" value="80"
+           oninput="setVolume(this.value)" class="volume-slider">
+    <span class="vol-icon">&#128266;</span>
+  </div>
+
+  <!-- Admin link -->
+  <a href="/admin" class="admin-link">Admin</a>
+
+</div>
+
+<!-- Spotify Web Playback SDK -->
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+<script>
+let player     = null;
+let deviceId   = null;
+let isPlaying  = false;
+let progressMs = 0;
+let durationMs = 0;
+let progressInterval = null;
+let lastTrackId = null;
+
+window.onSpotifyWebPlaybackSDKReady = () => {
+  fetch('/api/token')
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { window.location.href = '/auth'; return; }
+      initPlayer(data.access_token);
+    })
+    .catch(() => { window.location.href = '/auth'; });
+};
+
+function initPlayer(token) {
+  player = new Spotify.Player({
+    name: 'Outland Radio — Negozio',
+    getOAuthToken: cb => {
+      fetch('/api/token')
+        .then(r => r.json())
+        .then(d => cb(d.access_token));
+    },
+    volume: 0.8,
+  });
+
+  player.addListener('ready', ({ device_id }) => {
+    deviceId = device_id;
+    document.getElementById('trackTitle').textContent  = 'Pronto';
+    document.getElementById('trackArtist').textContent = 'Seleziona una playlist dal pannello admin';
+    pollNowPlaying();
+  });
+
+  player.addListener('player_state_changed', state => {
+    if (!state) return;
+    isPlaying  = !state.paused;
+    progressMs = state.position;
+    durationMs = state.duration;
+    updatePlayUI(isPlaying);
+
+    const track = state.track_window?.current_track;
+    if (track) {
+      // Detect track change to trigger jingle
+      if (track.id && track.id !== lastTrackId) {
+        if (lastTrackId !== null) onTrackChange();
+        lastTrackId = track.id;
+      }
+
+      if (!jinglePlaying) {
+        document.getElementById('trackTitle').textContent  = track.name;
+        document.getElementById('trackArtist').textContent =
+          track.artists.map(a => a.name).join(', ');
+      }
+
+      const imgUrl = track.album.images?.[0]?.url;
+      if (imgUrl) showAlbumArt(imgUrl);
+
+      updateProgress(state.position, state.duration);
+    }
+
+    // Smooth progress ticker
+    clearInterval(progressInterval);
+    if (isPlaying) {
+      progressInterval = setInterval(() => {
+        progressMs = Math.min(progressMs + 1000, durationMs);
+        updateProgress(progressMs, durationMs);
+      }, 1000);
+    }
+  });
+
+  player.addListener('initialization_error', ({ message }) => {
+    setError('Errore di inizializzazione: ' + message);
+  });
+
+  player.addListener('authentication_error', () => {
+    window.location.href = '/auth';
+  });
+
+  player.addListener('account_error', () => {
+    setError('Account Spotify Premium richiesto per il Web Playback SDK.');
+  });
+
+  // Wire prev/next buttons
+  document.getElementById('btnPrev').addEventListener('click', () => player.previousTrack());
+  document.getElementById('btnNext').addEventListener('click', () => player.nextTrack());
+
+  player.connect();
+}
+
+function togglePlay() {
+  if (player) player.togglePlay();
+}
+
+function setVolume(v) {
+  if (player) player.setVolume(v / 100);
+}
+
+function updatePlayUI(playing) {
+  document.getElementById('playIcon').innerHTML = playing ? '&#9646;&#9646;' : '&#9654;';
+  document.getElementById('waveform').classList.toggle('active', playing);
+}
+
+function showAlbumArt(url) {
+  const img = document.getElementById('albumImage');
+  const ph  = document.getElementById('albumPlaceholder');
+  img.src             = url;
+  img.style.display   = 'block';
+  ph.style.display    = 'none';
+}
+
+function updateProgress(pos, dur) {
+  const pct = dur > 0 ? (pos / dur) * 100 : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressTime').textContent  = msToTime(pos);
+  document.getElementById('durationTime').textContent  = msToTime(dur);
+}
+
+function msToTime(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function setError(msg) {
+  document.getElementById('trackTitle').textContent  = msg;
+  document.getElementById('trackArtist').textContent = '';
+}
+
+// Fallback poll — keeps UI in sync if state change event is missed
+async function pollNowPlaying() {
+  try {
+    const r = await fetch('/api/now-playing');
+    const d = await r.json();
+    if (d.playing && d.title) {
+      document.getElementById('trackTitle').textContent  = d.title;
+      document.getElementById('trackArtist').textContent = d.artist;
+      if (d.image) showAlbumArt(d.image);
+    }
+  } catch(e) {}
+}
+setInterval(pollNowPlaying, 15000);
+
+// ── Jingle engine ──────────────────────────────────────────────────────
+
+let jingleCfg       = { enabled: true, every_n_songs: 3, every_n_minutes: 0 };
+let songCount       = 0;
+let jinglePlaying   = false;
+let minuteTimer     = null;
+
+async function loadJingleCfg() {
+  try {
+    const r = await fetch('/api/jingles/settings');
+    jingleCfg = await r.json();
+    startMinuteTimer();
+  } catch(e) {}
+}
+
+function startMinuteTimer() {
+  clearInterval(minuteTimer);
+  if (jingleCfg.enabled && jingleCfg.every_n_minutes > 0) {
+    minuteTimer = setInterval(triggerJingle, jingleCfg.every_n_minutes * 60 * 1000);
+  }
+}
+
+// Called from player_state_changed when a new track starts
+function onTrackChange() {
+  songCount++;
+  if (jingleCfg.enabled && jingleCfg.every_n_songs > 0 &&
+      songCount >= jingleCfg.every_n_songs) {
+    songCount = 0;
+    // Small delay so the new track has time to start before we pause
+    setTimeout(triggerJingle, 1500);
+  }
+}
+
+async function triggerJingle() {
+  if (jinglePlaying || !jingleCfg.enabled) return;
+  try {
+    const r = await fetch('/api/jingles/random');
+    const d = await r.json();
+    if (!d.url) return;
+    playJingle(d.url, d.name);
+  } catch(e) {}
+}
+
+function playJingle(url, name) {
+  jinglePlaying = true;
+
+  // Show jingle UI
+  const prevTitle  = document.getElementById('trackTitle').textContent;
+  const prevArtist = document.getElementById('trackArtist').textContent;
+  document.getElementById('trackTitle').textContent  = name || 'Outland Radio';
+  document.getElementById('trackArtist').textContent = '— Jingle —';
+
+  // Pause Spotify
+  if (player) player.pause();
+
+  const audio = new Audio(url);
+  audio.volume = document.getElementById('volumeSlider').value / 100;
+
+  audio.addEventListener('ended', () => {
+    jinglePlaying = false;
+    // Restore previous track info briefly, then SDK state will update it
+    document.getElementById('trackTitle').textContent  = prevTitle;
+    document.getElementById('trackArtist').textContent = prevArtist;
+    // Resume Spotify
+    if (player) player.resume();
+  });
+
+  audio.addEventListener('error', () => {
+    jinglePlaying = false;
+    if (player) player.resume();
+  });
+
+  audio.play().catch(() => {
+    jinglePlaying = false;
+    if (player) player.resume();
+  });
+}
+
+loadJingleCfg();
+</script>
+</body>
+</html>

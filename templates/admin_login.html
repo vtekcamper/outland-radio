@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outland Radio &mdash; Admin</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="login-body">
+<div class="login-card">
+  <div class="login-brand">OUTLAND RADIO</div>
+  <div class="login-sub">Pannello Admin</div>
+  <form method="post">
+    {% for msg in get_flashed_messages() %}
+      <p class="err">{{ msg }}</p>
+    {% endfor %}
+    <div class="field">
+      <input type="password" name="password" placeholder="Password admin"
+             class="input-full" required autofocus>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block">Accedi</button>
+  </form>
+  <a href="/" class="login-back">&#8592; Torna al player</a>
+</div>
+</body>
+</html>
