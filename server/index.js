@@ -46,16 +46,17 @@ await fastify.register(fastifyMultipart, {
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB per file
 });
 
+// Configure nunjucks manually so we can register custom filters via addFilter()
+// (@fastify/view passes options to nunjucks.configure() but nunjucks ignores unknown keys like
+// "filters" — filters must be added on the Environment object returned by configure())
+const njkEnv = nunjucks.configure(join(ROOT, 'templates'), { autoescape: true });
+njkEnv.addFilter('tojson', (v) => JSON.stringify(v));
+njkEnv.addFilter('int',    (v) => Math.floor(Number(v)));
+
 await fastify.register(fastifyView, {
-  engine: { nunjucks },                     // pass the MODULE, not a pre-configured env
+  // Shim: @fastify/view calls shim.configure() → we return our pre-configured env
+  engine: { nunjucks: { configure: (_root, _opts) => njkEnv } },
   root:   join(ROOT, 'templates'),
-  options: {
-    autoescape: true,
-    filters: {
-      tojson: (v) => JSON.stringify(v),
-      int:    (v) => Math.floor(Number(v)),
-    },
-  },
 });
 
 await fastify.register(fastifyStatic, {
