@@ -358,9 +358,11 @@ async function playJingle(url, name) {
     jinglePlaying = false;
   };
 
-  // Start fade-out when remaining time ≤ fade duration
+  // Start fade-out only for files long enough that crossfade makes sense
+  const jingleFadeThresholdMs = fade * 2 + 500;
   audio.addEventListener('timeupdate', () => {
     if (!handledEnd && isFinite(audio.duration) && audio.duration > 0) {
+      if (audio.duration * 1000 <= jingleFadeThresholdMs) return;
       const remaining = (audio.duration - audio.currentTime) * 1000;
       if (remaining <= fade + 80) restoreSpotify();
     }
@@ -428,9 +430,13 @@ async function playAnnouncement(url, name, duckVol) {
     announcePlaying = false;
   };
 
-  // Trigger early fade-out so restore overlaps the tail of the announcement
+  // Trigger early fade-out only when the file is long enough that crossfade makes sense.
+  // Threshold: file must be longer than fade-in + fade-out + 500ms of "core" content.
+  // For short files the 'ended' event handles restore so we don't cut them prematurely.
+  const earlyFadeThresholdMs = fade * 2 + 500;
   audio.addEventListener('timeupdate', () => {
     if (!handledEnd && isFinite(audio.duration) && audio.duration > 0) {
+      if (audio.duration * 1000 <= earlyFadeThresholdMs) return; // file too short — let 'ended' handle it
       const remaining = (audio.duration - audio.currentTime) * 1000;
       if (remaining <= fade + 80) restoreMusic();
     }

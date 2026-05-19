@@ -313,13 +313,14 @@
                 <span class="card-hint">finestra ±sec per orari fissi</span>
               </div>
               <div class="jadv-field">
-                <label>Cooldown</label>
+                <label>Cooldown minimo</label>
                 <div style="display:flex;align-items:center;gap:6px">
                   <input type="number" min="1" max="1440" value="{{ a.cooldown_min }}"
                          class="input-number" style="width:72px"
                          onchange="saveAnnSetting('{{ a.id }}','cooldown_min',+this.value)">
-                  <span class="card-hint">min tra ripetizioni</span>
+                  <span class="card-hint">min di pausa dopo ogni play</span>
                 </div>
+                <span class="card-hint">imposta ≤ intervallo per non bloccare</span>
               </div>
               <div class="jadv-field">
                 <label>Intervallo automatico</label>
@@ -1146,13 +1147,14 @@ function addAnnounceToList(a) {
           <span class="card-hint">finestra ±sec per orari fissi</span>
         </div>
         <div class="jadv-field">
-          <label>Cooldown</label>
+          <label>Cooldown minimo</label>
           <div style="display:flex;align-items:center;gap:6px">
             <input type="number" min="1" max="1440" value="5"
                    class="input-number" style="width:72px"
                    onchange="saveAnnSetting('${a.id}','cooldown_min',+this.value)">
-            <span class="card-hint">min tra ripetizioni</span>
+            <span class="card-hint">min di pausa dopo ogni play</span>
           </div>
+          <span class="card-hint">imposta ≤ intervallo per non bloccare</span>
         </div>
         <div class="jadv-field">
           <label>Intervallo automatico</label>
