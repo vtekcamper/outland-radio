@@ -133,7 +133,7 @@ def admin_required(f):
 def player():
     if not is_authenticated():
         return redirect(url_for("auth"))
-    return render_template("player.html")
+    return render_template("player.html", branding=load_branding())
 
 @app.route("/auth")
 def auth():
@@ -346,12 +346,22 @@ BRANDING_DEFAULTS = {
     "bg_color":      "#1c2b33",
     "text_color":    "#f0f4f5",
 }
+LOGO_ALLOWED = {"png", "jpg", "jpeg", "svg", "webp", "gif"}
+
+def _logo_path():
+    for ext in LOGO_ALLOWED:
+        p = DATA_DIR / f"logo.{ext}"
+        if p.exists():
+            return p
+    return None
 
 def load_branding():
     try:
-        return {**BRANDING_DEFAULTS, **json.loads(BRANDING_FILE.read_text())}
+        b = {**BRANDING_DEFAULTS, **json.loads(BRANDING_FILE.read_text())}
     except Exception:
-        return dict(BRANDING_DEFAULTS)
+        b = dict(BRANDING_DEFAULTS)
+    b["has_logo"] = _logo_path() is not None
+    return b
 
 def save_branding(data):
     BRANDING_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
@@ -359,6 +369,14 @@ def save_branding(data):
 @app.route("/api/branding")
 def api_branding():
     return jsonify(load_branding())
+
+@app.route("/api/logo")
+def serve_logo():
+    p = _logo_path()
+    if not p:
+        return "", 404
+    from flask import send_file
+    return send_file(str(p))
 
 @app.route("/admin/branding", methods=["POST"])
 @admin_required
@@ -369,6 +387,27 @@ def admin_save_branding():
         if key in body:
             b[key] = str(body[key])[:200]
     save_branding(b)
+    return jsonify({"ok": True})
+
+@app.route("/admin/branding/logo", methods=["POST"])
+@admin_required
+def upload_logo():
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "Nessun file"}), 400
+    f = request.files["file"]
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in LOGO_ALLOWED:
+        return jsonify({"ok": False, "error": "Formato non supportato (usa PNG, JPG, SVG, WEBP)"}), 400
+    for old in DATA_DIR.glob("logo.*"):
+        old.unlink(missing_ok=True)
+    f.save(str(DATA_DIR / f"logo.{ext}"))
+    return jsonify({"ok": True, "url": f"/api/logo?v={int(time.time())}"})
+
+@app.route("/admin/branding/logo/delete", methods=["POST"])
+@admin_required
+def delete_logo():
+    for old in DATA_DIR.glob("logo.*"):
+        old.unlink(missing_ok=True)
     return jsonify({"ok": True})
 
 # ── Scheduler helpers ────────────────────────────────────────────────────

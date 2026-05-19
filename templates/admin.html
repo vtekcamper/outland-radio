@@ -185,6 +185,29 @@
           <span id="bTextHex" style="font-size:13px;opacity:.7">{{ branding.text_color }}</span>
         </div>
       </div>
+      <div class="ctrl-row">
+        <label class="ctrl-label">Logo</label>
+        <div class="logo-upload-wrap">
+          {% if branding.has_logo %}
+          <img src="/api/logo" id="logoPreviewImg" class="logo-admin-preview" alt="Logo attuale">
+          {% else %}
+          <div class="logo-admin-placeholder" id="logoPreviewImg">Nessun logo</div>
+          {% endif %}
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <input type="file" id="logoFileInput" accept=".png,.jpg,.jpeg,.svg,.webp,.gif"
+                   style="display:none" onchange="uploadLogo(this.files[0])">
+            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('logoFileInput').click()">
+              Carica immagine
+            </button>
+            {% if branding.has_logo %}
+            <button class="btn btn-sm btn-danger" id="logoDeleteBtn" onclick="deleteLogo()">Rimuovi logo</button>
+            {% else %}
+            <button class="btn btn-sm btn-danger" id="logoDeleteBtn" onclick="deleteLogo()" style="display:none">Rimuovi logo</button>
+            {% endif %}
+            <span class="card-hint">PNG, JPG, SVG, WEBP</span>
+          </div>
+        </div>
+      </div>
       <div style="margin-top:12px">
         <button class="btn btn-primary" onclick="saveBranding()">Salva &amp; Applica</button>
         <a href="/" target="_blank" class="btn btn-secondary" style="margin-left:8px">Anteprima player &#8599;</a>
@@ -447,6 +470,48 @@ document.getElementById('bBg').addEventListener('input', e => {
 document.getElementById('bText').addEventListener('input', e => {
   document.getElementById('bTextHex').textContent = e.target.value;
 });
+
+async function uploadLogo(file) {
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/admin/branding/logo', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.ok) {
+      const prev = document.getElementById('logoPreviewImg');
+      const img = document.createElement('img');
+      img.id = 'logoPreviewImg';
+      img.className = 'logo-admin-preview';
+      img.src = d.url;
+      img.alt = 'Logo';
+      prev.replaceWith(img);
+      document.getElementById('logoDeleteBtn').style.display = '';
+      showToast('Logo caricato');
+    } else {
+      showToast(d.error || 'Errore upload', false);
+    }
+  } catch(e) {
+    showToast('Errore di rete', false);
+  }
+}
+
+async function deleteLogo() {
+  if (!confirm('Rimuovere il logo?')) return;
+  try {
+    await fetch('/admin/branding/logo/delete', { method: 'POST' });
+    const prev = document.getElementById('logoPreviewImg');
+    const ph = document.createElement('div');
+    ph.id = 'logoPreviewImg';
+    ph.className = 'logo-admin-placeholder';
+    ph.textContent = 'Nessun logo';
+    prev.replaceWith(ph);
+    document.getElementById('logoDeleteBtn').style.display = 'none';
+    showToast('Logo rimosso');
+  } catch(e) {
+    showToast('Errore di rete', false);
+  }
+}
 
 async function saveBranding() {
   const body = {
