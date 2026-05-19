@@ -1,0 +1,29 @@
+{
+  "name": "outland-radio",
+  "version": "2.0.0",
+  "description": "Outland Store in-store radio — Node.js + Fastify + SSE",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/formbody": "^7.4.0",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/session": "^10.9.0",
+    "@fastify/static": "^7.0.4",
+    "@fastify/view": "^9.1.0",
+    "axios": "^1.7.2",
+    "bullmq": "^5.12.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.0",
+    "ioredis": "^5.3.2",
+    "nunjucks": "^3.2.4",
+    "uuid": "^10.0.0"
+  }
+}

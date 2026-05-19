@@ -11,9 +11,7 @@
   <div class="login-brand">OUTLAND RADIO</div>
   <div class="login-sub">Pannello Admin</div>
   <form method="post">
-    {% for msg in get_flashed_messages() %}
-      <p class="err">{{ msg }}</p>
-    {% endfor %}
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
     <div class="field">
       <input type="password" name="password" placeholder="Password admin"
              class="input-full" required autofocus>

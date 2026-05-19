@@ -10,7 +10,7 @@
 
 <div class="player-wrap">
 
-  <!-- Branding (populated dynamically) -->
+  <!-- Branding -->
   <div class="player-brand">
     {% if branding.has_logo %}
     <img src="/api/logo" id="brandLogo" class="logo-img" alt="{{ branding.store_name }}">
@@ -69,51 +69,96 @@
   <div class="volume-wrap">
     <span class="vol-icon">&#128264;</span>
     <input type="range" id="volumeSlider" min="0" max="100" value="80"
-           oninput="setVolume(this.value)" class="volume-slider">
+           oninput="onSliderChange(this.value)" class="volume-slider">
     <span class="vol-icon">&#128266;</span>
   </div>
 
   <!-- Admin link -->
   <a href="/admin" class="admin-link">Admin</a>
 
-</div>
+</div><!-- /player-wrap -->
 
 <!-- Spotify Web Playback SDK -->
 <script src="https://sdk.scdn.co/spotify-player.js"></script>
 <script>
-let player     = null;
-let deviceId   = null;
-let isPlaying  = false;
-let progressMs = 0;
-let durationMs = 0;
-let progressInterval = null;
-let lastTrackId = null;
-let announcePlaying = false;
+'use strict';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+let player           = null;
+let deviceId         = null;
+let isPlaying        = false;
+let progressMs       = 0;
+let durationMs       = 0;
+let progressInterval = null;
+let lastTrackId      = null;
+
+let jinglePlaying    = false;
+let announcePlaying  = false;
+
+let jingleCfg = { enabled: true, every_n_songs: 3, every_n_minutes: 0,
+                  rotation_mode: 'no_repeat', crossfade_ms: 1500 };
+
+// Spotify slider volume (0–1) — kept in sync with the slider
+let sliderVol = 0.8;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WEB AUDIO API  (for jingle / announce mixing — NOT Spotify itself)
+// ═══════════════════════════════════════════════════════════════════════════
+let audioCtx = null;
+let sfxGain  = null;   // GainNode for jingle/announce audio
+
+function ensureAudioCtx() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  sfxGain  = audioCtx.createGain();
+  sfxGain.gain.value = 0;
+  sfxGain.connect(audioCtx.destination);
+  // Resume context after user gesture (browser autoplay policy)
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+// Schedule a Spotify SDK volume ramp using precise Web Audio clock timing.
+// Since Spotify SDK doesn't expose an AudioNode, we use a stepped setTimeout
+// approach referenced to audioCtx.currentTime so it stays in sync.
+function scheduleSpotifyRamp(fromVol, toVol, atAudioTime, fadeSec) {
+  if (!audioCtx) return;
+  const startDelay = Math.max(0, (atAudioTime - audioCtx.currentTime) * 1000);
+  const STEPS      = 24;
+  const stepMs     = (fadeSec * 1000) / STEPS;
+  setTimeout(() => {
+    for (let i = 0; i <= STEPS; i++) {
+      setTimeout(() => {
+        const t   = i / STEPS;
+        const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;   // ease-in-out
+        const vol  = fromVol + (toVol - fromVol) * ease;
+        if (player) player.setVolume(Math.max(0, Math.min(1, vol)));
+      }, i * stepMs);
+    }
+  }, startDelay);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPOTIFY WEB PLAYBACK SDK
+// ═══════════════════════════════════════════════════════════════════════════
 window.onSpotifyWebPlaybackSDKReady = () => {
   fetch('/api/token')
     .then(r => r.json())
-    .then(data => {
-      if (data.error) { window.location.href = '/auth'; return; }
-      initPlayer(data.access_token);
-    })
+    .then(d => { if (d.error) { window.location.href = '/auth'; return; } initPlayer(d.access_token); })
     .catch(() => { window.location.href = '/auth'; });
 };
 
 function initPlayer(token) {
   player = new Spotify.Player({
     name: 'Outland Radio — Negozio',
-    getOAuthToken: cb => {
-      fetch('/api/token')
-        .then(r => r.json())
-        .then(d => cb(d.access_token));
-    },
-    volume: 0.8,
+    getOAuthToken: cb => fetch('/api/token').then(r => r.json()).then(d => cb(d.access_token)),
+    volume: sliderVol,
   });
 
   player.addListener('ready', ({ device_id }) => {
     deviceId = device_id;
-    // Registra il device sul server così l'admin sa dove suonare
+    ensureAudioCtx();
     fetch('/api/register-device', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -133,25 +178,24 @@ function initPlayer(token) {
 
     const track = state.track_window?.current_track;
     if (track) {
-      // Detect track change to trigger jingle
       if (track.id && track.id !== lastTrackId) {
-        if (lastTrackId !== null) onTrackChange();
+        if (lastTrackId !== null) {
+          // Notify server about track change (server handles jingle trigger logic)
+          fetch('/api/track-changed', { method: 'POST' }).catch(() => {});
+        }
         lastTrackId = track.id;
       }
 
-      if (!jinglePlaying) {
+      if (!jinglePlaying && !announcePlaying) {
         document.getElementById('trackTitle').textContent  = track.name;
-        document.getElementById('trackArtist').textContent =
-          track.artists.map(a => a.name).join(', ');
+        document.getElementById('trackArtist').textContent = track.artists.map(a => a.name).join(', ');
       }
 
       const imgUrl = track.album.images?.[0]?.url;
       if (imgUrl) showAlbumArt(imgUrl);
-
       updateProgress(state.position, state.duration);
     }
 
-    // Smooth progress ticker
     clearInterval(progressInterval);
     if (isPlaying) {
       progressInterval = setInterval(() => {
@@ -161,19 +205,10 @@ function initPlayer(token) {
     }
   });
 
-  player.addListener('initialization_error', ({ message }) => {
-    setError('Errore di inizializzazione: ' + message);
-  });
+  player.addListener('initialization_error', ({ message }) => setError('Errore di inizializzazione: ' + message));
+  player.addListener('authentication_error',  ()           => { window.location.href = '/auth'; });
+  player.addListener('account_error',         ()           => setError('Account Spotify Premium richiesto.'));
 
-  player.addListener('authentication_error', () => {
-    window.location.href = '/auth';
-  });
-
-  player.addListener('account_error', () => {
-    setError('Account Spotify Premium richiesto per il Web Playback SDK.');
-  });
-
-  // Wire prev/next buttons
   document.getElementById('btnPrev').addEventListener('click', () => player.previousTrack());
   document.getElementById('btnNext').addEventListener('click', () => player.nextTrack());
 
@@ -181,11 +216,13 @@ function initPlayer(token) {
 }
 
 function togglePlay() {
+  ensureAudioCtx();
   if (player) player.togglePlay();
 }
 
-function setVolume(v) {
-  if (player) player.setVolume(v / 100);
+function onSliderChange(v) {
+  sliderVol = v / 100;
+  if (player && !jinglePlaying && !announcePlaying) player.setVolume(sliderVol);
 }
 
 function updatePlayUI(playing) {
@@ -196,16 +233,16 @@ function updatePlayUI(playing) {
 function showAlbumArt(url) {
   const img = document.getElementById('albumImage');
   const ph  = document.getElementById('albumPlaceholder');
-  img.src             = url;
-  img.style.display   = 'block';
-  ph.style.display    = 'none';
+  img.src           = url;
+  img.style.display = 'block';
+  ph.style.display  = 'none';
 }
 
 function updateProgress(pos, dur) {
   const pct = dur > 0 ? (pos / dur) * 100 : 0;
   document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('progressTime').textContent  = msToTime(pos);
-  document.getElementById('durationTime').textContent  = msToTime(dur);
+  document.getElementById('progressTime').textContent = msToTime(pos);
+  document.getElementById('durationTime').textContent = msToTime(dur);
 }
 
 function msToTime(ms) {
@@ -218,249 +255,180 @@ function setError(msg) {
   document.getElementById('trackArtist').textContent = '';
 }
 
-// Fallback poll — keeps UI in sync if state change event is missed
+// Fallback poll to keep UI in sync (low frequency — SSE handles real-time)
 async function pollNowPlaying() {
   try {
-    const r = await fetch('/api/now-playing');
-    const d = await r.json();
-    if (d.playing && d.title) {
+    const d = await fetch('/api/now-playing').then(r => r.json());
+    if (d.playing && d.title && !jinglePlaying && !announcePlaying) {
       document.getElementById('trackTitle').textContent  = d.title;
       document.getElementById('trackArtist').textContent = d.artist;
       if (d.image) showAlbumArt(d.image);
     }
-  } catch(e) {}
+  } catch {}
 }
-setInterval(pollNowPlaying, 15000);
+setInterval(pollNowPlaying, 20_000);
 
-// ── Jingle engine ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIO OVERLAY ENGINE  (jingle + announce — shared logic)
+// ═══════════════════════════════════════════════════════════════════════════
 
-let jingleCfg     = { enabled: true, every_n_songs: 3, every_n_minutes: 0,
-                      rotation_mode: 'no_repeat', crossfade_ms: 1500 };
-let songCount     = 0;
-let jinglePlaying = false;
-let minuteTimer   = null;
+/**
+ * playOverlay: plays audio from `src` over Spotify.
+ *
+ * For JINGLES: pauses Spotify, plays jingle at full volume, resumes.
+ * For ANNOUNCES: ducks Spotify to duckTarget, plays announce on top, restores.
+ *
+ * All Spotify volume transitions use scheduleSpotifyRamp() which references
+ * audioCtx.currentTime, so they run even when this tab is in the background.
+ * The sfxGain AudioParam uses linearRampToValueAtTime for hardware-precise fading.
+ */
+function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
+  // duckTarget === null  → jingle mode (pause Spotify)
+  // duckTarget === 0..1  → announce mode (duck Spotify to fraction of slider)
+  if (jinglePlaying || announcePlaying) return;
 
-async function loadJingleCfg() {
-  try {
-    const r  = await fetch('/api/jingles/settings');
-    jingleCfg = await r.json();
-    startMinuteTimer();
-  } catch(e) {}
-}
+  const isJingle  = duckTarget === null;
+  if (isJingle)  jinglePlaying   = true;
+  else           announcePlaying = true;
 
-function startMinuteTimer() {
-  clearInterval(minuteTimer);
-  if (jingleCfg.enabled && jingleCfg.every_n_minutes > 0)
-    minuteTimer = setInterval(triggerJingle, jingleCfg.every_n_minutes * 60 * 1000);
-}
+  ensureAudioCtx();
 
-function onTrackChange() {
-  songCount++;
-  if (jingleCfg.enabled && jingleCfg.every_n_songs > 0 &&
-      songCount >= jingleCfg.every_n_songs) {
-    songCount = 0;
-    setTimeout(triggerJingle, 1500);
-  }
-}
+  const fadeS     = Math.max(0, crossfade_ms) / 1000;
+  const now       = audioCtx.currentTime;
+  const duckVol   = isJingle ? 0 : sliderVol * Math.max(0, Math.min(1, duckTarget));
 
-async function triggerJingle() {
-  if (jinglePlaying || !jingleCfg.enabled) return;
-  try {
-    const r = await fetch('/api/jingles/random');
-    const d = await r.json();
-    if (!d.url) return;
-    playJingle(d.url, d.name);
-  } catch(e) {}
-}
+  const audio     = new Audio(src);
+  audio.crossOrigin = 'anonymous';
+  const source    = audioCtx.createMediaElementSource(audio);
+  source.connect(sfxGain);
 
-// ── Crossfade engine ────────────────────────────────────────────────────
+  // ── Phase 1: fade SFX in, duck/pause Spotify ──────────────────────────
+  sfxGain.gain.cancelScheduledValues(now);
+  sfxGain.gain.setValueAtTime(0, now);
 
-// Smooth volume animation: ease-in-out curve, uses requestAnimationFrame
-function animateVol(getV, setV, target, ms) {
-  return new Promise(resolve => {
-    if (ms <= 0) { setV(target); return resolve(); }
-    const start = getV();
-    const t0    = performance.now();
-    const ease  = t => t < .5 ? 2*t*t : -1+(4-2*t)*t;
-    const tick  = () => {
-      const p = Math.min((performance.now()-t0) / ms, 1);
-      setV(Math.max(0, Math.min(1, start + (target-start) * ease(p))));
-      p < 1 ? requestAnimationFrame(tick) : resolve();
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-async function playJingle(url, name) {
-  if (jinglePlaying) return;
-  jinglePlaying = true;
-
-  const fade      = jingleCfg.crossfade_ms ?? 1500;
-  const targetVol = document.getElementById('volumeSlider').value / 100;
-  const prevTitle  = document.getElementById('trackTitle').textContent;
-  const prevArtist = document.getElementById('trackArtist').textContent;
-
-  const audio = new Audio(url);
-
-  // ── Phase 1: fade out Spotify, fade in jingle simultaneously ──────────
-  if (fade > 0 && player) {
-    audio.volume = 0;
-    let sdkVol   = targetVol;
-
-    const started = await audio.play().then(() => true).catch(() => false);
-    if (!started) { jinglePlaying = false; return; }
-
-    await Promise.all([
-      // Spotify fades to 0
-      animateVol(() => sdkVol,        v => { sdkVol = v;        player.setVolume(v); }, 0,         fade),
-      // Jingle fades in to target
-      animateVol(() => audio.volume,  v => { audio.volume = v;  },                      targetVol, fade),
-    ]);
-    player.pause();                    // already at vol 0 — inaudible
-    player.setVolume(targetVol);       // restore SDK vol for when it resumes
-
+  if (fadeS > 0) {
+    sfxGain.gain.linearRampToValueAtTime(1.0, now + fadeS);
+    scheduleSpotifyRamp(sliderVol, duckVol, now, fadeS);
   } else {
-    // No crossfade — hard cut
-    audio.volume = targetVol;
-    if (player) player.pause();
-    const started = await audio.play().then(() => true).catch(() => false);
-    if (!started) { jinglePlaying = false; if (player) player.resume(); return; }
+    sfxGain.gain.setValueAtTime(1.0, now);
   }
 
-  document.getElementById('trackTitle').textContent  = name || 'Outland Radio';
-  document.getElementById('trackArtist').textContent  = '— Jingle —';
+  if (isJingle) {
+    // Brief delay so the fade starts before Spotify is paused
+    setTimeout(() => {
+      if (player) { player.setVolume(0); player.pause(); player.setVolume(sliderVol); }
+    }, fadeS * 1000);
+  }
 
-  // ── Phase 2: near end of jingle, crossfade back to Spotify ────────────
-  let handledEnd = false;
-  const restoreSpotify = async (force = false) => {
-    if (handledEnd) return;
-    handledEnd = true;
+  // Start playback
+  audio.play().catch(() => {
+    if (isJingle)  { jinglePlaying   = false; if (player) player.resume(); }
+    else           { announcePlaying = false; }
+    sfxGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    sfxGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    if (player) player.setVolume(sliderVol);
+  });
 
-    if (fade > 0 && player) {
-      let sdkVol2 = 0;
+  // ── Phase 2: restore ──────────────────────────────────────────────────
+  let restored = false;
+
+  async function restore() {
+    if (restored) return;
+    restored = true;
+
+    const endNow  = audioCtx.currentTime;
+    const restoreS = fadeS > 0 ? fadeS : 0.05;
+
+    // Fade SFX out
+    sfxGain.gain.cancelScheduledValues(endNow);
+    sfxGain.gain.setValueAtTime(sfxGain.gain.value, endNow);
+    sfxGain.gain.linearRampToValueAtTime(0, endNow + restoreS);
+
+    if (isJingle && player) {
+      // Resume Spotify silently then ramp up
       player.setVolume(0);
       await player.resume();
-      await Promise.all([
-        // Jingle fades out
-        animateVol(() => audio.volume, v => { audio.volume = v; }, 0,         fade * 0.9),
-        // Spotify fades in (slight delay for natural feel)
-        (async () => {
-          await new Promise(r => setTimeout(r, fade * 0.15));
-          await animateVol(() => sdkVol2, v => { sdkVol2 = v; player.setVolume(v); }, targetVol, fade * 0.85);
-        })(),
-      ]);
-    } else {
-      if (player) { await player.resume(); player.setVolume(targetVol); }
+      scheduleSpotifyRamp(0, sliderVol, endNow, restoreS);
+    } else if (!isJingle) {
+      scheduleSpotifyRamp(duckVol, sliderVol, endNow, restoreS);
     }
 
-    document.getElementById('trackTitle').textContent  = prevTitle;
-    document.getElementById('trackArtist').textContent  = prevArtist;
-    jinglePlaying = false;
+    setTimeout(() => {
+      sfxGain.gain.setValueAtTime(0, audioCtx.currentTime);
+      if (player) player.setVolume(sliderVol);
+      if (isJingle)  jinglePlaying   = false;
+      else           announcePlaying = false;
+    }, (restoreS + 0.1) * 1000);
+  }
+
+  // Trigger early restore when remaining time ≤ fadeS (only for long files)
+  const earlyFadeThreshold = fadeS * 2000 + 500;   // ms
+  audio.addEventListener('timeupdate', () => {
+    if (restored || !isFinite(audio.duration) || audio.duration === 0) return;
+    if (audio.duration * 1000 <= earlyFadeThreshold) return;  // too short → let 'ended' handle it
+    const remaining = (audio.duration - audio.currentTime) * 1000;
+    if (remaining <= fadeS * 1000 + 80) restore();
+  });
+  audio.addEventListener('ended', () => restore());
+  audio.addEventListener('error', () => {
+    restored = true;
+    sfxGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    if (player) { if (isJingle) player.resume(); player.setVolume(sliderVol); }
+    if (isJingle)  jinglePlaying   = false;
+    else           announcePlaying = false;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SSE  — receive events from server
+// ═══════════════════════════════════════════════════════════════════════════
+function connectSSE() {
+  const es = new EventSource('/api/stream');
+
+  es.onmessage = (e) => {
+    let event;
+    try { event = JSON.parse(e.data); } catch { return; }
+
+    switch (event.type) {
+      case 'JINGLE':
+        if (jinglePlaying || announcePlaying) return;
+        playOverlay({
+          src:          event.src,
+          name:         event.name,
+          crossfade_ms: event.crossfade_ms ?? 1500,
+          duckTarget:   null,   // jingle mode
+        });
+        break;
+
+      case 'ANNOUNCE':
+        if (announcePlaying || jinglePlaying) return;
+        playOverlay({
+          src:          event.src,
+          name:         event.name,
+          crossfade_ms: event.crossfade_ms ?? 1000,
+          duckTarget:   event.duck_volume  ?? 0.3,
+        });
+        break;
+    }
   };
 
-  // Start fade-out only for files long enough that crossfade makes sense
-  const jingleFadeThresholdMs = fade * 2 + 500;
-  audio.addEventListener('timeupdate', () => {
-    if (!handledEnd && isFinite(audio.duration) && audio.duration > 0) {
-      if (audio.duration * 1000 <= jingleFadeThresholdMs) return;
-      const remaining = (audio.duration - audio.currentTime) * 1000;
-      if (remaining <= fade + 80) restoreSpotify();
-    }
-  });
-  audio.addEventListener('ended', () => restoreSpotify());
-  audio.addEventListener('error', () => {
-    handledEnd = true;
-    jinglePlaying = false;
-    if (player) { player.resume(); player.setVolume(targetVol); }
-    document.getElementById('trackTitle').textContent  = prevTitle;
-    document.getElementById('trackArtist').textContent  = prevArtist;
-  });
-}
-
-loadJingleCfg();
-
-// ── Announcement engine ────────────────────────────────────────────────
-// Polls every 30 s. When due: mark played FIRST (prevents re-trigger),
-// then duck Spotify with animateVol and overlay the announcement audio.
-
-async function checkAnnouncements() {
-  if (announcePlaying || jinglePlaying) return;
-  try {
-    const r = await fetch('/api/announce/pending');
-    const d = await r.json();
-    if (!d.id) return;
-    // Mark before playing so server cooldown blocks any concurrent poll
-    await fetch(`/api/announce/${d.id}/played`, { method: 'POST' });
-    playAnnouncement(d.url, d.name, d.duck_volume ?? 0.3);
-  } catch(e) {}
-}
-
-async function playAnnouncement(url, name, duckVol) {
-  if (announcePlaying) return;
-  announcePlaying = true;
-
-  // Shorter fade for announcements — we don't pause Spotify, we duck it
-  const fade      = Math.min((jingleCfg.crossfade_ms ?? 1000) * 0.7, 1000);
-  const sliderVol = document.getElementById('volumeSlider').value / 100;
-  const duckTarget = sliderVol * Math.max(0, Math.min(1, duckVol));
-
-  const audio = new Audio(url);
-  audio.volume = 0;
-
-  const started = await audio.play().then(() => true).catch(() => false);
-  if (!started) { announcePlaying = false; return; }
-
-  // Phase 1: duck Spotify, fade announcement in simultaneously
-  let sdkVol = sliderVol;
-  await Promise.all([
-    animateVol(() => sdkVol,       v => { sdkVol = v; if (player) player.setVolume(v); }, duckTarget, fade),
-    animateVol(() => audio.volume, v => { audio.volume = v; },                             sliderVol,  fade),
-  ]);
-
-  // Phase 2: restore Spotify when announcement is finishing
-  let handledEnd = false;
-  const restoreMusic = async () => {
-    if (handledEnd) return;
-    handledEnd = true;
-    let sdkVol2 = duckTarget;
-    await Promise.all([
-      animateVol(() => audio.volume, v => { audio.volume = v; },                               0,         fade),
-      animateVol(() => sdkVol2,      v => { sdkVol2 = v; if (player) player.setVolume(v); }, sliderVol, fade),
-    ]);
-    announcePlaying = false;
+  es.onerror = () => {
+    // Browser auto-reconnects EventSource after error, but add a small delay
+    es.close();
+    setTimeout(connectSSE, 5_000);
   };
-
-  // Trigger early fade-out only when the file is long enough that crossfade makes sense.
-  // Threshold: file must be longer than fade-in + fade-out + 500ms of "core" content.
-  // For short files the 'ended' event handles restore so we don't cut them prematurely.
-  const earlyFadeThresholdMs = fade * 2 + 500;
-  audio.addEventListener('timeupdate', () => {
-    if (!handledEnd && isFinite(audio.duration) && audio.duration > 0) {
-      if (audio.duration * 1000 <= earlyFadeThresholdMs) return; // file too short — let 'ended' handle it
-      const remaining = (audio.duration - audio.currentTime) * 1000;
-      if (remaining <= fade + 80) restoreMusic();
-    }
-  });
-  audio.addEventListener('ended', () => restoreMusic());
-  audio.addEventListener('error', () => {
-    handledEnd = true;
-    if (player) player.setVolume(sliderVol);
-    announcePlaying = false;
-  });
 }
 
-// First check after 15 s (let the player stabilise), then every 30 s
-setTimeout(() => {
-  checkAnnouncements();
-  setInterval(checkAnnouncements, 30000);
-}, 15000);
+connectSSE();
 
-// ── Branding ───────────────────────────────────────────────────────────
-
+// ═══════════════════════════════════════════════════════════════════════════
+// BRANDING  — apply CSS custom properties from server
+// ═══════════════════════════════════════════════════════════════════════════
 async function applyBranding() {
   try {
-    const r = await fetch('/api/branding');
-    const b = await r.json();
+    const b    = await fetch('/api/branding').then(r => r.json());
+    const root = document.documentElement;
+
     document.getElementById('brandName').textContent = b.store_name     || 'OUTLAND RADIO';
     document.getElementById('brandSub').textContent  = b.store_subtitle || '';
 
@@ -477,15 +445,14 @@ async function applyBranding() {
       logo.style.display = 'none';
     }
 
-    const root = document.documentElement;
     root.style.setProperty('--color-primary', b.primary_color || '#d97706');
     root.style.setProperty('--color-text',    b.text_color    || '#f0f4f5');
     const bg = b.bg_color || '#1c2b33';
     root.style.setProperty('--color-bg', bg);
-    const h = bg.replace('#','');
+    const h    = bg.replace('#', '');
     const dark = `rgb(${Math.floor(parseInt(h.slice(0,2),16)*.6)},${Math.floor(parseInt(h.slice(2,4),16)*.6)},${Math.floor(parseInt(h.slice(4,6),16)*.6)})`;
     root.style.setProperty('--color-bg-dark', dark);
-  } catch(e) {}
+  } catch {}
 }
 
 applyBranding();
