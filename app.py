@@ -212,7 +212,15 @@ def search_playlists():
     q = request.args.get("q", "").strip()
     if not q:
         return jsonify([])
-    data, _ = spotify_api("get", f"/search?q={requests.utils.quote(q)}&type=playlist&limit=24&market=IT")
+    token = get_access_token()
+    if not token:
+        return jsonify([])
+    r = requests.get(
+        "https://api.spotify.com/v1/search",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"q": q, "type": "playlist", "limit": 24, "market": "IT"},
+    )
+    data = r.json() if r.status_code == 200 else {}
     items = (data or {}).get("playlists", {}).get("items", [])
     return jsonify([{
         "name":        p.get("name", ""),
@@ -221,6 +229,17 @@ def search_playlists():
         "owner":       p.get("owner", {}).get("display_name", ""),
         "track_count": (p.get("tracks") or {}).get("total", 0),
     } for p in items if p])
+
+@app.route("/api/debug/search")
+def api_debug_search():
+    q = request.args.get("q", "rock")
+    token = get_access_token()
+    r = requests.get(
+        "https://api.spotify.com/v1/search",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"q": q, "type": "playlist", "limit": 5, "market": "IT"},
+    )
+    return jsonify({"status": r.status_code, "raw": r.json()})
 
 @app.route("/api/debug/playlists")
 def api_debug_playlists():
