@@ -23,17 +23,18 @@ export default async function adminRoutes(fastify) {
   });
 
   fastify.post('/admin/login', async (req, reply) => {
-    if (req.body?.password === ADMIN_PW) {
+    const pw = req.body?.password;
+    fastify.log.warn({ bodyKeys: req.body ? Object.keys(req.body) : null, match: pw === ADMIN_PW }, '[login] POST /admin/login');
+    if (pw === ADMIN_PW) {
       req.session.admin = true;
-      reply.redirect('/admin');
-    } else {
-      reply.redirect('/admin/login?error=1');
+      return reply.redirect('/admin');
     }
+    return reply.redirect('/admin/login?error=1');
   });
 
   fastify.get('/admin/logout', async (req, reply) => {
-    req.session.destroy();
-    reply.redirect('/');
+    await req.session.destroy();
+    return reply.redirect('/');
   });
 
   // ── Admin panel ───────────────────────────────────────────────────────────

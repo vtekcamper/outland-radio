@@ -28,7 +28,7 @@ const ROOT      = join(__dirname, '..');
 
 // ── Fastify ────────────────────────────────────────────────────────────────
 const fastify = Fastify({
-  logger: { level: process.env.NODE_ENV === 'production' ? 'warn' : 'info' },
+  logger: { level: process.env.LOG_LEVEL || 'info' },
   bodyLimit: 110 * 1024 * 1024,   // 110 MB for audio uploads
 });
 
@@ -38,7 +38,12 @@ await fastify.register(fastifyFormbody);
 
 await fastify.register(fastifySession, {
   secret:      process.env.FLASK_SECRET_KEY || 'outland-radio-change-in-production-32ch',
-  cookie:      { secure: process.env.NODE_ENV === 'production', httpOnly: true, maxAge: 86400000 },
+  cookie:      {
+    secure:   process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge:   86400000,
+    sameSite: 'lax',   // ensure cookie is sent on same-site redirects
+  },
   saveUninitialized: false,
 });
 
