@@ -375,8 +375,14 @@ def save_jingle_settings():
 @admin_required
 def admin():
     data, _ = spotify_api("get", "/me/playlists?limit=50")
-    playlists = [p for p in (data or {}).get("items", []) if p]
-    jingles   = load_jingle_meta()
+    raw = [p for p in (data or {}).get("items", []) if p]
+    playlists = [{
+        "name":        p.get("name", ""),
+        "uri":         p.get("uri", ""),
+        "image":       (p.get("images") or [{}])[0].get("url", ""),
+        "track_count": (p.get("tracks") or p.get("items") or {}).get("total", 0),
+    } for p in raw]
+    jingles    = load_jingle_meta()
     jingle_cfg = load_jingle_cfg()
     return render_template("admin.html", playlists=playlists,
                            jingles=jingles, jingle_cfg=jingle_cfg)
