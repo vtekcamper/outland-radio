@@ -653,6 +653,39 @@ body {
 .btn-danger  { background: #dc2626; color: #fff; }
 .btn-danger:hover  { background: #b91c1c; }
 
+/* ── COLOR PICKER ───────────────────────────────────────────────────── */
+
+.color-picker {
+  -webkit-appearance: none;
+  width: 44px;
+  height: 36px;
+  padding: 2px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  background: none;
+}
+.color-picker::-webkit-color-swatch-wrapper { padding: 0; border-radius: 6px; }
+.color-picker::-webkit-color-swatch         { border: none; border-radius: 6px; }
+
+/* ── SCHEDULE ────────────────────────────────────────────────────────── */
+
+.schedule-add input[type="time"] {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  min-width: 110px;
+}
+
+/* ── CSS CUSTOM PROPS (player branding) ─────────────────────────────── */
+
+:root {
+  --color-primary: #d97706;
+  --color-bg:      #1c2b33;
+  --color-text:    #f0f4f5;
+}
+
 /* ── UTILITY ────────────────────────────────────────────────────────── */
 
 .empty-state { text-align: center; color: #9ca3af; padding: 32px; font-size: 14px; }

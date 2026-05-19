@@ -10,12 +10,12 @@
 
 <div class="player-wrap">
 
-  <!-- Branding -->
+  <!-- Branding (populated dynamically) -->
   <div class="player-brand">
-    <div class="logo-mark">OR</div>
+    <div class="logo-mark" id="brandMark">OR</div>
     <div class="player-brand-text">
-      <span class="brand-name">OUTLAND RADIO</span>
-      <span class="brand-sub">Outland Store &middot; Accessori Camper</span>
+      <span class="brand-name" id="brandName">OUTLAND RADIO</span>
+      <span class="brand-sub"  id="brandSub">Outland Store &middot; Accessori Camper</span>
     </div>
   </div>
 
@@ -304,6 +304,25 @@ function playJingle(url, name) {
 }
 
 loadJingleCfg();
+
+// ── Branding ───────────────────────────────────────────────────────────
+
+async function applyBranding() {
+  try {
+    const r = await fetch('/api/branding');
+    const b = await r.json();
+    document.getElementById('brandName').textContent = b.store_name    || 'OUTLAND RADIO';
+    document.getElementById('brandSub').textContent  = b.store_subtitle || '';
+    const initials = (b.store_name || 'OR').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    document.getElementById('brandMark').textContent = initials;
+    const root = document.documentElement;
+    root.style.setProperty('--color-primary', b.primary_color || '#d97706');
+    root.style.setProperty('--color-bg',      b.bg_color      || '#1c2b33');
+    root.style.setProperty('--color-text',    b.text_color    || '#f0f4f5');
+  } catch(e) {}
+}
+
+applyBranding();
 </script>
 </body>
 </html>

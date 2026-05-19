@@ -145,6 +145,91 @@
     </div>
   </div>
 
+  <!-- Identità visiva -->
+  <div class="card">
+    <div class="card-head">
+      <h3>Identità Visiva</h3>
+      <span class="card-hint">Personalizza il player del negozio</span>
+    </div>
+    <div class="card-body">
+      <div class="ctrl-row">
+        <label class="ctrl-label">Nome radio</label>
+        <input type="text" id="bStoreName" class="input-full"
+               value="{{ branding.store_name }}" maxlength="60"
+               placeholder="OUTLAND RADIO">
+      </div>
+      <div class="ctrl-row">
+        <label class="ctrl-label">Sottotitolo</label>
+        <input type="text" id="bStoreSub" class="input-full"
+               value="{{ branding.store_subtitle }}" maxlength="80"
+               placeholder="Outland Store · Accessori Camper">
+      </div>
+      <div class="ctrl-row">
+        <label class="ctrl-label">Colore primario</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="color" id="bPrimary" value="{{ branding.primary_color }}" class="color-picker">
+          <span id="bPrimaryHex" style="font-size:13px;opacity:.7">{{ branding.primary_color }}</span>
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <label class="ctrl-label">Sfondo</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="color" id="bBg" value="{{ branding.bg_color }}" class="color-picker">
+          <span id="bBgHex" style="font-size:13px;opacity:.7">{{ branding.bg_color }}</span>
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <label class="ctrl-label">Testo</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="color" id="bText" value="{{ branding.text_color }}" class="color-picker">
+          <span id="bTextHex" style="font-size:13px;opacity:.7">{{ branding.text_color }}</span>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" onclick="saveBranding()">Salva &amp; Applica</button>
+        <a href="/" target="_blank" class="btn btn-secondary" style="margin-left:8px">Anteprima player &#8599;</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Programmazione -->
+  <div class="card">
+    <div class="card-head">
+      <h3>Programmazione Automatica</h3>
+      <span class="card-hint">Playlist diversa per orario/giorno</span>
+    </div>
+    <div class="card-body">
+      <p class="card-hint" style="margin-bottom:12px">Inserisci l'URI Spotify della playlist (es. <code>spotify:playlist:37i9dQZ…</code>) e l'orario di attivazione automatica.</p>
+      <div id="scheduleList">
+        {% for s in schedule %}
+        <div class="jingle-item" data-idx="{{ loop.index0 }}">
+          <div style="flex:1;min-width:0">
+            <span style="font-weight:600">{{ s.label }}</span>
+            <span style="opacity:.6;font-size:13px;margin-left:8px">{{ s.days }} {{ s.start }}–{{ s.end }}</span>
+          </div>
+          <button class="btn btn-sm btn-danger" onclick="deleteSchedule({{ loop.index0 }})">Rimuovi</button>
+        </div>
+        {% else %}
+        <p class="empty-state" id="scheduleEmpty">Nessuna programmazione configurata.</p>
+        {% endfor %}
+      </div>
+      <div class="schedule-add" style="margin-top:14px;display:grid;gap:8px">
+        <input type="text"   id="sLabel"  class="input-full" placeholder="Nome (es. Mattina Rock)">
+        <input type="text"   id="sUri"    class="input-full" placeholder="URI Spotify (spotify:playlist:…)">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="sDays" class="input-number" style="flex:1">
+            <option value="daily">Ogni giorno</option>
+            <option value="mon-fri">Lun–Ven</option>
+            <option value="sat-sun">Sab–Dom</option>
+          </select>
+          <input type="time" id="sStart" class="input-number" value="09:00">
+          <input type="time" id="sEnd"   class="input-number" value="13:00">
+        </div>
+        <button class="btn btn-primary" onclick="addSchedule()">+ Aggiungi slot</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Cerca genere -->
   <div class="card">
     <div class="card-head">
@@ -350,6 +435,90 @@ async function searchPlaylists() {
     searchPlaylists();
   }
 })();
+
+// ── Branding ───────────────────────────────────────────────────────────
+
+document.getElementById('bPrimary').addEventListener('input', e => {
+  document.getElementById('bPrimaryHex').textContent = e.target.value;
+});
+document.getElementById('bBg').addEventListener('input', e => {
+  document.getElementById('bBgHex').textContent = e.target.value;
+});
+document.getElementById('bText').addEventListener('input', e => {
+  document.getElementById('bTextHex').textContent = e.target.value;
+});
+
+async function saveBranding() {
+  const body = {
+    store_name:    document.getElementById('bStoreName').value.trim(),
+    store_subtitle: document.getElementById('bStoreSub').value.trim(),
+    primary_color: document.getElementById('bPrimary').value,
+    bg_color:      document.getElementById('bBg').value,
+    text_color:    document.getElementById('bText').value,
+  };
+  try {
+    const r = await fetch('/admin/branding', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    showToast(d.ok ? 'Branding salvato! Aggiorna il player per vederlo.' : 'Errore salvataggio', d.ok);
+  } catch(e) {
+    showToast('Errore di rete', false);
+  }
+}
+
+// ── Schedule ───────────────────────────────────────────────────────────
+
+let scheduleData = {{ schedule | tojson }};
+
+function renderSchedule() {
+  const list = document.getElementById('scheduleList');
+  if (!scheduleData.length) {
+    list.innerHTML = '<p class="empty-state">Nessuna programmazione configurata.</p>';
+    return;
+  }
+  list.innerHTML = scheduleData.map((s, i) => `
+    <div class="jingle-item">
+      <div style="flex:1;min-width:0">
+        <span style="font-weight:600">${escH(s.label)}</span>
+        <span style="opacity:.6;font-size:13px;margin-left:8px">${escH(s.days)} ${escH(s.start)}–${escH(s.end)}</span>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="deleteSchedule(${i})">Rimuovi</button>
+    </div>`).join('');
+}
+
+async function addSchedule() {
+  const label = document.getElementById('sLabel').value.trim();
+  const uri   = document.getElementById('sUri').value.trim();
+  const days  = document.getElementById('sDays').value;
+  const start = document.getElementById('sStart').value;
+  const end   = document.getElementById('sEnd').value;
+  if (!label || !uri) { showToast('Inserisci nome e URI playlist', false); return; }
+  if (!uri.startsWith('spotify:playlist:')) { showToast('URI non valido — deve iniziare con spotify:playlist:', false); return; }
+  scheduleData.push({ label, uri, days, start, end });
+  await saveSchedule();
+  document.getElementById('sLabel').value = '';
+  document.getElementById('sUri').value   = '';
+  renderSchedule();
+}
+
+async function deleteSchedule(idx) {
+  scheduleData.splice(idx, 1);
+  await saveSchedule();
+  renderSchedule();
+}
+
+async function saveSchedule() {
+  try {
+    await fetch('/admin/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduleData),
+    });
+  } catch(e) {}
+}
 
 // ── Jingle management ──────────────────────────────────────────────────
 

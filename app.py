@@ -28,6 +28,8 @@ ADMIN_PASSWORD        = os.getenv("ADMIN_PASSWORD", "outland2024")
 DATA_DIR       = Path(os.getenv("DATA_DIR", "/programmatic-seo"))
 TOKEN_FILE     = DATA_DIR / "spotify_tokens.json"
 DEVICE_FILE    = DATA_DIR / "device_id.txt"
+LAST_PLAY_FILE = DATA_DIR / "last_played.json"
+BRANDING_FILE  = DATA_DIR / "branding.json"
 JINGLES_DIR    = DATA_DIR / "jingles"
 JINGLE_META    = DATA_DIR / "jingles_meta.json"
 JINGLE_CFG     = DATA_DIR / "jingle_settings.json"
@@ -197,8 +199,22 @@ def api_now_playing():
 @app.route("/api/register-device", methods=["POST"])
 def register_device():
     device_id = (request.json or {}).get("device_id", "")
-    if device_id:
-        DEVICE_FILE.write_text(device_id)
+    if not device_id:
+        return jsonify({"ok": False})
+    DEVICE_FILE.write_text(device_id)
+    # Auto-resume last played playlist on the new device
+    try:
+        last = json.loads(LAST_PLAY_FILE.read_text())
+        uri  = last.get("uri")
+        if uri:
+            import threading
+            def _resume():
+                time.sleep(1.5)  # wait for SDK to stabilize
+                spotify_api("put", f"/me/player/play?device_id={device_id}",
+                            json={"context_uri": uri})
+            threading.Thread(target=_resume, daemon=True).start()
+    except Exception:
+        pass
     return jsonify({"ok": True})
 
 def get_device_id():
@@ -277,7 +293,13 @@ def api_play():
     qs        = f"?device_id={device_id}" if device_id else ""
     payload   = {"context_uri": uri} if uri else {}
     _, status = spotify_api("put", f"/me/player/play{qs}", json=payload)
-    return jsonify({"ok": status in (200, 204)})
+    ok = status in (200, 204)
+    if ok and uri:
+        try:
+            LAST_PLAY_FILE.write_text(json.dumps({"uri": uri}))
+        except Exception:
+            pass
+    return jsonify({"ok": ok})
 
 @app.route("/api/pause", methods=["POST"])
 @admin_required
@@ -314,6 +336,66 @@ def api_shuffle():
     state = (request.json or {}).get("state", True)
     _, status = spotify_api("put", f"/me/player/shuffle?state={'true' if state else 'false'}")
     return jsonify({"ok": status in (200, 204)})
+
+# ── Branding helpers ─────────────────────────────────────────────────────
+
+BRANDING_DEFAULTS = {
+    "store_name":    "OUTLAND RADIO",
+    "store_subtitle": "Outland Store · Accessori Camper",
+    "primary_color": "#d97706",
+    "bg_color":      "#1c2b33",
+    "text_color":    "#f0f4f5",
+}
+
+def load_branding():
+    try:
+        return {**BRANDING_DEFAULTS, **json.loads(BRANDING_FILE.read_text())}
+    except Exception:
+        return dict(BRANDING_DEFAULTS)
+
+def save_branding(data):
+    BRANDING_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+@app.route("/api/branding")
+def api_branding():
+    return jsonify(load_branding())
+
+@app.route("/admin/branding", methods=["POST"])
+@admin_required
+def admin_save_branding():
+    body = request.json or {}
+    b = load_branding()
+    for key in BRANDING_DEFAULTS:
+        if key in body:
+            b[key] = str(body[key])[:200]
+    save_branding(b)
+    return jsonify({"ok": True})
+
+# ── Scheduler helpers ────────────────────────────────────────────────────
+
+SCHEDULE_FILE = DATA_DIR / "schedule.json"
+
+def load_schedule():
+    try:
+        return json.loads(SCHEDULE_FILE.read_text())
+    except Exception:
+        return []
+
+def save_schedule(entries):
+    SCHEDULE_FILE.write_text(json.dumps(entries, ensure_ascii=False, indent=2))
+
+@app.route("/api/schedule")
+def api_schedule():
+    return jsonify(load_schedule())
+
+@app.route("/admin/schedule", methods=["POST"])
+@admin_required
+def admin_save_schedule():
+    entries = request.json or []
+    if not isinstance(entries, list):
+        return jsonify({"ok": False}), 400
+    save_schedule(entries)
+    return jsonify({"ok": True})
 
 # ── Jingle helpers ────────────────────────────────────────────────────────
 
@@ -433,18 +515,13 @@ def save_jingle_settings():
 @app.route("/admin")
 @admin_required
 def admin():
-    data, _ = spotify_api("get", "/me/playlists?limit=50")
-    raw = [p for p in (data or {}).get("items", []) if p]
-    playlists = [{
-        "name":        p.get("name", ""),
-        "uri":         p.get("uri", ""),
-        "image":       (p.get("images") or [{}])[0].get("url", ""),
-        "track_count": (p.get("tracks") or p.get("items") or {}).get("total", 0),
-    } for p in raw]
     jingles    = load_jingle_meta()
     jingle_cfg = load_jingle_cfg()
-    return render_template("admin.html", playlists=playlists,
-                           jingles=jingles, jingle_cfg=jingle_cfg)
+    branding   = load_branding()
+    schedule   = load_schedule()
+    return render_template("admin.html",
+                           jingles=jingles, jingle_cfg=jingle_cfg,
+                           branding=branding, schedule=schedule)
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
