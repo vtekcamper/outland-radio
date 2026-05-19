@@ -184,76 +184,71 @@
 </div><!-- /admin-main -->
 
 <script>
-console.log('[Outland Admin] script start');
-// ── Playback control ───────────────────────────────────────────────────
-
-async function playPlaylist(uri, el) {
-  document.querySelectorAll('.playlist-card').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  const r = await fetch('/api/play', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ context_uri: uri }),
-  });
-  const d = await r.json();
-  if (!d.ok) {
-    el.classList.remove('active');
-    alert('Errore: assicurati che il player sia aperto nel browser del negozio (scheda /) e che sia Premium.');
-  } else {
-    setTimeout(updateNowPlaying, 1000);
-  }
-}
-
-// ── Ricerca genere ─────────────────────────────────────────────────────
-
-function quickSearch(q) {
-  document.getElementById('genreSearch').value = q;
-  searchPlaylists();
-}
-
-async function searchPlaylists() {
-  const q = document.getElementById('genreSearch').value.trim();
-  console.log('[Outland Admin] searchPlaylists called, q=', q);
-  if (!q) return;
-  const grid = document.getElementById('playlistGrid');
-  grid.innerHTML = '<p class="empty-state">Ricerca in corso...</p>';
-  try {
-    const r = await fetch(`/api/search-playlists?q=${encodeURIComponent(q)}`);
-    console.log('[Outland Admin] search response status:', r.status);
-    const data = await r.json();
-    if (r.status === 401) {
-      grid.innerHTML = `<p class="empty-state err">⚠️ ${data.message} — <a href="/" target="_blank" style="color:#d97706">Apri il player</a> per autenticarti con Spotify, poi riprova.</p>`;
-      return;
-    }
-    const playlists = Array.isArray(data) ? data : [];
-    console.log('[Outland Admin] playlists received:', playlists.length);
-    if (!playlists.length) {
-      grid.innerHTML = '<p class="empty-state">Nessuna playlist trovata.</p>';
-      return;
-    }
-    grid.innerHTML = playlists.map(p => `
-      <div class="playlist-card" onclick="playPlaylist('${p.uri}', this)">
-        ${p.image
-          ? `<img src="${p.image}" alt="${escH(p.name)}" class="pl-img">`
-          : `<div class="pl-img pl-img-empty">&#9835;</div>`}
-        <div class="pl-info">
-          <div class="pl-name">${escH(p.name)}</div>
-          <div class="pl-tracks">${escH(p.owner)} &middot; ${p.track_count} brani</div>
-        </div>
-      </div>`).join('');
-  } catch(e) {
-    console.error('[Outland Admin] search error:', e);
-    grid.innerHTML = '<p class="empty-state err">Errore nella ricerca.</p>';
-  }
-}
+// ── Helpers ────────────────────────────────────────────────────────────
 
 function escH(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function showToast(msg, ok = true) {
+  let t = document.getElementById('adminToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'adminToast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;z-index:999;transition:opacity .4s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = ok ? '#16a34a' : '#dc2626';
+  t.style.color = '#fff';
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.style.opacity = '0', 2500);
+}
+
+// ── Playback control ───────────────────────────────────────────────────
+
+async function playPlaylist(uri, el) {
+  document.querySelectorAll('.playlist-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  el.style.opacity = '0.6';
+  try {
+    const r = await fetch('/api/play', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_uri: uri }),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      el.classList.remove('active');
+      showToast('Errore: apri il player (/) nel browser del negozio e riprova.', false);
+    } else {
+      showToast('Riproduzione avviata');
+      refreshNowPlaying();
+    }
+  } catch(e) {
+    el.classList.remove('active');
+    showToast('Errore di rete', false);
+  } finally {
+    el.style.opacity = '';
+  }
+}
+
 async function ctrlApi(action) {
-  await fetch(`/api/${action}`, { method: 'POST' });
-  setTimeout(updateNowPlaying, 600);
+  try {
+    const r = await fetch(`/api/${action}`, { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (d.ok === false) showToast('Comando fallito — player non attivo?', false);
+  } catch(e) {
+    showToast('Errore di rete', false);
+  }
+  refreshNowPlaying();
+}
+
+function refreshNowPlaying() {
+  updateNowPlaying();
+  setTimeout(updateNowPlaying, 1500);
+  setTimeout(updateNowPlaying, 3500);
 }
 
 async function setVol(v) {
@@ -282,8 +277,8 @@ async function updateNowPlaying() {
     const d = await r.json();
 
     if (d.playing && d.title) {
-      document.getElementById('adminTitle').textContent      = d.title;
-      document.getElementById('adminArtist').textContent     = d.artist || d.album || '—';
+      document.getElementById('adminTitle').textContent       = d.title;
+      document.getElementById('adminArtist').textContent      = d.artist || d.album || '—';
       document.getElementById('nowPlayingHeader').textContent = `${d.title} · ${d.artist}`;
       document.getElementById('statusDot').className          = 'status-dot status-live';
       if (d.image) {
@@ -293,10 +288,10 @@ async function updateNowPlaying() {
         document.getElementById('adminArtEmpty').style.display = 'none';
       }
     } else {
-      document.getElementById('nowPlayingHeader').textContent = 'In pausa';
+      document.getElementById('nowPlayingHeader').textContent = d.title ? `${d.title} — in pausa` : 'Nessuna riproduzione';
       document.getElementById('statusDot').className          = 'status-dot status-off';
-      document.getElementById('adminTitle').textContent       = 'Nessuna riproduzione';
-      document.getElementById('adminArtist').textContent      = '—';
+      document.getElementById('adminTitle').textContent       = d.title || 'Nessuna riproduzione';
+      document.getElementById('adminArtist').textContent      = d.artist || '—';
     }
   } catch(e) {
     document.getElementById('statusDot').className = 'status-dot';
@@ -304,7 +299,57 @@ async function updateNowPlaying() {
 }
 
 updateNowPlaying();
-setInterval(updateNowPlaying, 6000);
+setInterval(updateNowPlaying, 4000);
+
+// ── Ricerca genere ─────────────────────────────────────────────────────
+
+function quickSearch(q) {
+  document.getElementById('genreSearch').value = q;
+  sessionStorage.setItem('adminLastSearch', q);
+  searchPlaylists();
+}
+
+async function searchPlaylists() {
+  const q = document.getElementById('genreSearch').value.trim();
+  if (!q) return;
+  sessionStorage.setItem('adminLastSearch', q);
+  const grid = document.getElementById('playlistGrid');
+  grid.innerHTML = '<p class="empty-state">Ricerca in corso...</p>';
+  try {
+    const r = await fetch(`/api/search-playlists?q=${encodeURIComponent(q)}`);
+    const data = await r.json();
+    if (r.status === 401) {
+      grid.innerHTML = `<p class="empty-state err">⚠️ ${data.message} — <a href="/" target="_blank" style="color:#d97706">Apri il player</a> per autenticarti con Spotify, poi riprova.</p>`;
+      return;
+    }
+    const playlists = Array.isArray(data) ? data : [];
+    if (!playlists.length) {
+      grid.innerHTML = '<p class="empty-state">Nessuna playlist trovata.</p>';
+      return;
+    }
+    grid.innerHTML = playlists.map(p => `
+      <div class="playlist-card" onclick="playPlaylist('${escH(p.uri)}', this)">
+        ${p.image
+          ? `<img src="${escH(p.image)}" alt="${escH(p.name)}" class="pl-img">`
+          : `<div class="pl-img pl-img-empty">&#9835;</div>`}
+        <div class="pl-info">
+          <div class="pl-name">${escH(p.name)}</div>
+          <div class="pl-tracks">${escH(p.owner)}${p.track_count ? ` &middot; ${p.track_count} brani` : ''}</div>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    grid.innerHTML = '<p class="empty-state err">Errore nella ricerca.</p>';
+  }
+}
+
+// Ripristina ultima ricerca dopo refresh
+(function restoreSearch() {
+  const lastQ = sessionStorage.getItem('adminLastSearch');
+  if (lastQ) {
+    document.getElementById('genreSearch').value = lastQ;
+    searchPlaylists();
+  }
+})();
 
 // ── Jingle management ──────────────────────────────────────────────────
 

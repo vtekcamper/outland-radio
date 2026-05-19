@@ -282,19 +282,22 @@ def api_play():
 @app.route("/api/pause", methods=["POST"])
 @admin_required
 def api_pause():
-    _, status = spotify_api("put", "/me/player/pause")
+    data, status = spotify_api("put", "/me/player/pause")
+    app.logger.info("pause → %s %s", status, data)
     return jsonify({"ok": status in (200, 204)})
 
 @app.route("/api/next", methods=["POST"])
 @admin_required
 def api_next():
-    _, status = spotify_api("post", "/me/player/next")
+    data, status = spotify_api("post", "/me/player/next")
+    app.logger.info("next → %s %s", status, data)
     return jsonify({"ok": status in (200, 204)})
 
 @app.route("/api/prev", methods=["POST"])
 @admin_required
 def api_prev():
-    _, status = spotify_api("post", "/me/player/previous")
+    data, status = spotify_api("post", "/me/player/previous")
+    app.logger.info("prev → %s %s", status, data)
     return jsonify({"ok": status in (200, 204)})
 
 @app.route("/api/volume", methods=["POST"])
