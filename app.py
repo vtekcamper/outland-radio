@@ -193,6 +193,11 @@ def api_now_playing():
         "duration_ms":  item.get("duration_ms", 0),
     })
 
+@app.route("/api/debug/playlists")
+def api_debug_playlists():
+    data, status = spotify_api("get", "/me/playlists?limit=50")
+    return jsonify({"status": status, "raw": data})
+
 @app.route("/api/playlists")
 def api_playlists():
     data, _ = spotify_api("get", "/me/playlists?limit=50")
@@ -370,7 +375,7 @@ def save_jingle_settings():
 @admin_required
 def admin():
     data, _ = spotify_api("get", "/me/playlists?limit=50")
-    playlists = [p for p in (data or {}).get("items", []) if p and p.get("tracks")]
+    playlists = [p for p in (data or {}).get("items", []) if p]
     jingles   = load_jingle_meta()
     jingle_cfg = load_jingle_cfg()
     return render_template("admin.html", playlists=playlists,
