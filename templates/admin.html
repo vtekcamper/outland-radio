@@ -184,6 +184,7 @@
 </div><!-- /admin-main -->
 
 <script>
+console.log('[Outland Admin] script start');
 // ── Playback control ───────────────────────────────────────────────────
 
 async function playPlaylist(uri, el) {
@@ -212,12 +213,15 @@ function quickSearch(q) {
 
 async function searchPlaylists() {
   const q = document.getElementById('genreSearch').value.trim();
+  console.log('[Outland Admin] searchPlaylists called, q=', q);
   if (!q) return;
   const grid = document.getElementById('playlistGrid');
   grid.innerHTML = '<p class="empty-state">Ricerca in corso...</p>';
   try {
     const r = await fetch(`/api/search-playlists?q=${encodeURIComponent(q)}`);
+    console.log('[Outland Admin] search response status:', r.status);
     const playlists = await r.json();
+    console.log('[Outland Admin] playlists received:', playlists.length);
     if (!playlists.length) {
       grid.innerHTML = '<p class="empty-state">Nessuna playlist trovata.</p>';
       return;
@@ -229,10 +233,11 @@ async function searchPlaylists() {
           : `<div class="pl-img pl-img-empty">&#9835;</div>`}
         <div class="pl-info">
           <div class="pl-name">${escH(p.name)}</div>
-          <div class="pl-tracks">${p.owner} &middot; ${p.track_count} brani</div>
+          <div class="pl-tracks">${escH(p.owner)} &middot; ${p.track_count} brani</div>
         </div>
       </div>`).join('');
   } catch(e) {
+    console.error('[Outland Admin] search error:', e);
     grid.innerHTML = '<p class="empty-state err">Errore nella ricerca.</p>';
   }
 }
@@ -373,13 +378,16 @@ async function saveJingleSettings() {
 
 // Drag-drop upload for jingles
 const jingleZone = document.getElementById('jingleUploadZone');
-jingleZone.addEventListener('dragover', e => { e.preventDefault(); jingleZone.classList.add('drag-over'); });
-jingleZone.addEventListener('dragleave', ()  => jingleZone.classList.remove('drag-over'));
-jingleZone.addEventListener('drop', e => {
-  e.preventDefault();
-  jingleZone.classList.remove('drag-over');
-  uploadJingles(e.dataTransfer.files);
-});
+if (jingleZone) {
+  jingleZone.addEventListener('dragover', e => { e.preventDefault(); jingleZone.classList.add('drag-over'); });
+  jingleZone.addEventListener('dragleave', ()  => jingleZone.classList.remove('drag-over'));
+  jingleZone.addEventListener('drop', e => {
+    e.preventDefault();
+    jingleZone.classList.remove('drag-over');
+    uploadJingles(e.dataTransfer.files);
+  });
+}
+console.log('[Outland Admin] init complete');
 </script>
 </body>
 </html>
