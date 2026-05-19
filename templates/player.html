@@ -106,6 +106,12 @@ function initPlayer(token) {
 
   player.addListener('ready', ({ device_id }) => {
     deviceId = device_id;
+    // Registra il device sul server così l'admin sa dove suonare
+    fetch('/api/register-device', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id }),
+    });
     document.getElementById('trackTitle').textContent  = 'Pronto';
     document.getElementById('trackArtist').textContent = 'Seleziona una playlist dal pannello admin';
     pollNowPlaying();

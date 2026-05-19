@@ -522,6 +522,44 @@ body {
 }
 .login-back:hover { color: #374151; }
 
+/* ── SEARCH & GENRE CHIPS ───────────────────────────────────────────── */
+
+.search-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.genre-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.chip:hover {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #92400e;
+}
+.chip.active {
+  background: #d97706;
+  border-color: #d97706;
+  color: #fff;
+}
+
 /* ── JINGLE SECTION ─────────────────────────────────────────────────── */
 
 .jingle-settings {

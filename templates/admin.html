@@ -145,34 +145,38 @@
     </div>
   </div>
 
-  <!-- Playlist -->
+  <!-- Cerca genere -->
   <div class="card">
     <div class="card-head">
-      <h3>Playlist Spotify</h3>
+      <h3>Cerca musica per genere</h3>
       <span class="card-hint">Clicca per trasmettere</span>
     </div>
     <div class="card-body">
-      <p class="card-note">
-        Le playlist vengono prese direttamente dal tuo account Spotify.
-        Per aggiungerne di nuove, creale su Spotify e ricarica questa pagina.
-      </p>
+      <!-- Ricerca libera -->
+      <div class="search-row">
+        <input type="text" id="genreSearch" class="input-full"
+               placeholder="Es: rock, jazz, lofi, pop italiano, indie..."
+               onkeydown="if(event.key==='Enter') searchPlaylists()">
+        <button class="btn btn-primary" onclick="searchPlaylists()">Cerca</button>
+      </div>
+      <!-- Generi rapidi -->
+      <div class="genre-chips">
+        <button class="chip" onclick="quickSearch('rock')">Rock</button>
+        <button class="chip" onclick="quickSearch('pop italiano')">Pop Italiano</button>
+        <button class="chip" onclick="quickSearch('hip hop')">Hip Hop</button>
+        <button class="chip" onclick="quickSearch('jazz')">Jazz</button>
+        <button class="chip" onclick="quickSearch('lofi chill')">Lofi</button>
+        <button class="chip" onclick="quickSearch('ambient')">Ambient</button>
+        <button class="chip" onclick="quickSearch('house')">House</button>
+        <button class="chip" onclick="quickSearch('metal')">Metal</button>
+        <button class="chip" onclick="quickSearch('indie')">Indie</button>
+        <button class="chip" onclick="quickSearch('r&b soul')">R&amp;B</button>
+        <button class="chip" onclick="quickSearch('reggaeton')">Reggaeton</button>
+        <button class="chip" onclick="quickSearch('classica')">Classica</button>
+      </div>
+      <!-- Risultati -->
       <div class="playlist-grid" id="playlistGrid">
-        {% for p in playlists %}
-        <div class="playlist-card" data-uri="{{ p.uri }}" onclick="playPlaylist('{{ p.uri }}', this)">
-          {% if p.image %}
-          <img src="{{ p.image }}" alt="{{ p.name }}" class="pl-img">
-          {% else %}
-          <div class="pl-img pl-img-empty">&#9835;</div>
-          {% endif %}
-          <div class="pl-info">
-            <div class="pl-name">{{ p.name }}</div>
-            <div class="pl-tracks">{{ p.track_count }} brani</div>
-          </div>
-        </div>
-        {% endfor %}
-        {% if not playlists %}
-        <p class="empty-state">Nessuna playlist trovata sul tuo account Spotify.</p>
-        {% endif %}
+        <p class="empty-state" id="searchHint">Cerca un genere o clicca un chip sopra</p>
       </div>
     </div>
   </div>
@@ -192,11 +196,49 @@ async function playPlaylist(uri, el) {
   });
   const d = await r.json();
   if (!d.ok) {
-    alert('Errore: assicurati che il player sia aperto nel browser del negozio (scheda /).');
     el.classList.remove('active');
+    alert('Errore: assicurati che il player sia aperto nel browser del negozio (scheda /) e che sia Premium.');
   } else {
     setTimeout(updateNowPlaying, 1000);
   }
+}
+
+// ── Ricerca genere ─────────────────────────────────────────────────────
+
+function quickSearch(q) {
+  document.getElementById('genreSearch').value = q;
+  searchPlaylists();
+}
+
+async function searchPlaylists() {
+  const q = document.getElementById('genreSearch').value.trim();
+  if (!q) return;
+  const grid = document.getElementById('playlistGrid');
+  grid.innerHTML = '<p class="empty-state">Ricerca in corso...</p>';
+  try {
+    const r = await fetch(`/api/search-playlists?q=${encodeURIComponent(q)}`);
+    const playlists = await r.json();
+    if (!playlists.length) {
+      grid.innerHTML = '<p class="empty-state">Nessuna playlist trovata.</p>';
+      return;
+    }
+    grid.innerHTML = playlists.map(p => `
+      <div class="playlist-card" onclick="playPlaylist('${p.uri}', this)">
+        ${p.image
+          ? `<img src="${p.image}" alt="${escH(p.name)}" class="pl-img">`
+          : `<div class="pl-img pl-img-empty">&#9835;</div>`}
+        <div class="pl-info">
+          <div class="pl-name">${escH(p.name)}</div>
+          <div class="pl-tracks">${p.owner} &middot; ${p.track_count} brani</div>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    grid.innerHTML = '<p class="empty-state err">Errore nella ricerca.</p>';
+  }
+}
+
+function escH(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function ctrlApi(action) {

@@ -27,6 +27,7 @@ ADMIN_PASSWORD        = os.getenv("ADMIN_PASSWORD", "outland2024")
 # Railway Volume mount path — persiste tra i redeploy
 DATA_DIR       = Path(os.getenv("DATA_DIR", "/programmatic-seo"))
 TOKEN_FILE     = DATA_DIR / "spotify_tokens.json"
+DEVICE_FILE    = DATA_DIR / "device_id.txt"
 JINGLES_DIR    = DATA_DIR / "jingles"
 JINGLE_META    = DATA_DIR / "jingles_meta.json"
 JINGLE_CFG     = DATA_DIR / "jingle_settings.json"
@@ -193,6 +194,34 @@ def api_now_playing():
         "duration_ms":  item.get("duration_ms", 0),
     })
 
+@app.route("/api/register-device", methods=["POST"])
+def register_device():
+    device_id = (request.json or {}).get("device_id", "")
+    if device_id:
+        DEVICE_FILE.write_text(device_id)
+    return jsonify({"ok": True})
+
+def get_device_id():
+    try:
+        return DEVICE_FILE.read_text().strip()
+    except Exception:
+        return ""
+
+@app.route("/api/search-playlists")
+def search_playlists():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify([])
+    data, _ = spotify_api("get", f"/search?q={requests.utils.quote(q)}&type=playlist&limit=24&market=IT")
+    items = (data or {}).get("playlists", {}).get("items", [])
+    return jsonify([{
+        "name":        p.get("name", ""),
+        "uri":         p.get("uri", ""),
+        "image":       (p.get("images") or [{}])[0].get("url", ""),
+        "owner":       p.get("owner", {}).get("display_name", ""),
+        "track_count": (p.get("tracks") or {}).get("total", 0),
+    } for p in items if p])
+
 @app.route("/api/debug/playlists")
 def api_debug_playlists():
     data, status = spotify_api("get", "/me/playlists?limit=50")
@@ -217,7 +246,7 @@ def api_playlists():
 def api_play():
     body      = request.json or {}
     uri       = body.get("context_uri")
-    device_id = body.get("device_id", "")
+    device_id = body.get("device_id") or get_device_id()
     qs        = f"?device_id={device_id}" if device_id else ""
     payload   = {"context_uri": uri} if uri else {}
     _, status = spotify_api("put", f"/me/player/play{qs}", json=payload)
