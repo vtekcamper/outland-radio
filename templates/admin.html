@@ -166,7 +166,7 @@
           {% endif %}
           <div class="pl-info">
             <div class="pl-name">{{ p.name }}</div>
-            <div class="pl-tracks">{{ p.tracks.total }} brani</div>
+            <div class="pl-tracks">{{ p.tracks.total if p.tracks else '?' }} brani</div>
           </div>
         </div>
         {% endfor %}

@@ -370,7 +370,7 @@ def save_jingle_settings():
 @admin_required
 def admin():
     data, _ = spotify_api("get", "/me/playlists?limit=50")
-    playlists = [p for p in (data or {}).get("items", []) if p]
+    playlists = [p for p in (data or {}).get("items", []) if p and p.get("tracks")]
     jingles   = load_jingle_meta()
     jingle_cfg = load_jingle_cfg()
     return render_template("admin.html", playlists=playlists,
