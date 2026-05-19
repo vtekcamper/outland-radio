@@ -214,14 +214,20 @@ def search_playlists():
         return jsonify([])
     token = get_access_token()
     if not token:
-        return jsonify([])
+        app.logger.warning("search-playlists: no token")
+        return jsonify({"error": "no_token", "message": "Vai su / per autenticarti con Spotify"}), 401
     r = requests.get(
         "https://api.spotify.com/v1/search",
         headers={"Authorization": f"Bearer {token}"},
         params={"q": q, "type": "playlist", "limit": 50},
     )
-    data = r.json() if r.status_code == 200 else {}
+    app.logger.info("Spotify search status: %s", r.status_code)
+    if r.status_code != 200:
+        app.logger.warning("Spotify search error: %s", r.text[:300])
+        return jsonify([])
+    data = r.json()
     items = [p for p in (data or {}).get("playlists", {}).get("items", []) if p]
+    app.logger.info("Spotify search items: %d (after filter)", len(items))
     return jsonify([{
         "name":        p.get("name", ""),
         "uri":         p.get("uri", ""),

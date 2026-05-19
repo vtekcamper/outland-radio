@@ -220,7 +220,12 @@ async function searchPlaylists() {
   try {
     const r = await fetch(`/api/search-playlists?q=${encodeURIComponent(q)}`);
     console.log('[Outland Admin] search response status:', r.status);
-    const playlists = await r.json();
+    const data = await r.json();
+    if (r.status === 401) {
+      grid.innerHTML = `<p class="empty-state err">⚠️ ${data.message} — <a href="/" target="_blank" style="color:#d97706">Apri il player</a> per autenticarti con Spotify, poi riprova.</p>`;
+      return;
+    }
+    const playlists = Array.isArray(data) ? data : [];
     console.log('[Outland Admin] playlists received:', playlists.length);
     if (!playlists.length) {
       grid.innerHTML = '<p class="empty-state">Nessuna playlist trovata.</p>';
