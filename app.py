@@ -3,7 +3,9 @@ import json
 import time
 import uuid
 import random
+import threading
 import requests
+from datetime import datetime
 from pathlib import Path
 from functools import wraps
 from urllib.parse import urlencode
@@ -438,17 +440,24 @@ def admin_save_schedule():
 
 # ── Jingle helpers ────────────────────────────────────────────────────────
 
+ROTATION_FILE = DATA_DIR / "jingle_rotation.json"
+_rotation_lock = threading.Lock()
+
+JINGLE_DEFAULTS = {"weight": 1, "time_start": None, "time_end": None, "days": []}
+
 def load_jingle_meta():
     try:
-        return json.loads(JINGLE_META.read_text())
+        raw = json.loads(JINGLE_META.read_text())
     except Exception:
         return []
+    return [{**JINGLE_DEFAULTS, **j} for j in raw]
 
 def save_jingle_meta(meta):
     JINGLE_META.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
 
 def load_jingle_cfg():
-    defaults = {"enabled": True, "every_n_songs": 3, "every_n_minutes": 0}
+    defaults = {"enabled": True, "every_n_songs": 3, "every_n_minutes": 0,
+                "rotation_mode": "no_repeat"}
     try:
         return {**defaults, **json.loads(JINGLE_CFG.read_text())}
     except Exception:
@@ -456,6 +465,81 @@ def load_jingle_cfg():
 
 def save_jingle_cfg(cfg):
     JINGLE_CFG.write_text(json.dumps(cfg, indent=2))
+
+def load_rotation():
+    defaults = {"mode": "no_repeat", "seq_index": 0, "played_ids": [], "last_id": None}
+    try:
+        return {**defaults, **json.loads(ROTATION_FILE.read_text())}
+    except Exception:
+        return defaults
+
+def save_rotation(rot):
+    ROTATION_FILE.write_text(json.dumps(rot, indent=2))
+
+def _jingle_active_now(j):
+    if not j.get("enabled", True):
+        return False
+    now = datetime.now()
+    days = j.get("days") or []
+    if days:
+        day_keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        if day_keys[now.weekday()] not in days:
+            return False
+    t_start = j.get("time_start")
+    t_end   = j.get("time_end")
+    if t_start and t_end:
+        now_hm = now.strftime("%H:%M")
+        if not (t_start <= now_hm <= t_end):
+            return False
+    return True
+
+def _pick_jingle(active, mode, rot):
+    """Select one jingle from `active` using `mode`, mutate and save `rot`."""
+    if not active:
+        return None
+
+    if mode == "sequential":
+        idx = rot.get("seq_index", 0) % len(active)
+        rot["seq_index"] = (idx + 1) % len(active)
+        chosen = active[idx]
+
+    elif mode == "weighted":
+        weights = [max(1, j.get("weight", 1)) for j in active]
+        pool = active.copy()
+        # Avoid immediate repeat when possible
+        last_id = rot.get("last_id")
+        if len(pool) > 1 and last_id:
+            reduced = [j for j in pool if j["id"] != last_id]
+            if reduced:
+                pool   = reduced
+                weights = [max(1, j.get("weight", 1)) for j in pool]
+        chosen = random.choices(pool, weights=weights, k=1)[0]
+
+    elif mode == "no_repeat":
+        played = set(rot.get("played_ids", []))
+        last_id = rot.get("last_id")
+        remaining = [j for j in active if j["id"] not in played]
+        if not remaining:
+            # Full cycle done — restart, avoid last played
+            played = set()
+            remaining = active.copy()
+        if len(remaining) > 1 and last_id:
+            filtered = [j for j in remaining if j["id"] != last_id]
+            if filtered:
+                remaining = filtered
+        chosen = random.choice(remaining)
+        played.add(chosen["id"])
+        rot["played_ids"] = list(played)
+
+    else:  # random (pure, avoid immediate repeat)
+        last_id = rot.get("last_id")
+        pool = active if len(active) <= 1 or not last_id else \
+               ([j for j in active if j["id"] != last_id] or active)
+        chosen = random.choice(pool)
+
+    rot["last_id"] = chosen["id"]
+    save_rotation(rot)
+    return chosen
 
 # ── Jingle API ────────────────────────────────────────────────────────────
 
@@ -469,10 +553,19 @@ def api_jingle_settings():
 
 @app.route("/api/jingles/random")
 def api_jingle_random():
-    meta = [j for j in load_jingle_meta() if j.get("enabled", True)]
-    if not meta:
+    cfg = load_jingle_cfg()
+    if not cfg.get("enabled", True):
         return jsonify({"url": None})
-    jingle = random.choice(meta)
+    meta   = load_jingle_meta()
+    active = [j for j in meta if _jingle_active_now(j)]
+    if not active:
+        return jsonify({"url": None})
+    mode = cfg.get("rotation_mode", "no_repeat")
+    with _rotation_lock:
+        rot    = load_rotation()
+        jingle = _pick_jingle(active, mode, rot)
+    if not jingle:
+        return jsonify({"url": None})
     return jsonify({"url": f"/jingles/files/{jingle['filename']}", "name": jingle["name"]})
 
 @app.route("/jingles/files/<filename>")
@@ -495,7 +588,8 @@ def upload_jingle():
     f.save(str(JINGLES_DIR / filename))
     meta = load_jingle_meta()
     name = Path(f.filename).stem.replace("_", " ").replace("-", " ")
-    meta.append({"id": uid, "filename": filename, "name": name, "enabled": True})
+    entry = {**JINGLE_DEFAULTS, "id": uid, "filename": filename, "name": name, "enabled": True}
+    meta.append(entry)
     save_jingle_meta(meta)
     return jsonify({"ok": True, "id": uid, "name": name})
 
@@ -524,6 +618,26 @@ def rename_jingle(jingle_id):
     save_jingle_meta(meta)
     return jsonify({"ok": True})
 
+@app.route("/admin/jingles/<jingle_id>/settings", methods=["POST"])
+@admin_required
+def jingle_per_settings(jingle_id):
+    body = request.json or {}
+    meta = load_jingle_meta()
+    for j in meta:
+        if j["id"] == jingle_id:
+            if "weight" in body:
+                j["weight"] = max(1, min(10, int(body["weight"])))
+            if "time_start" in body:
+                j["time_start"] = body["time_start"] or None
+            if "time_end" in body:
+                j["time_end"] = body["time_end"] or None
+            if "days" in body:
+                j["days"] = [d for d in body["days"]
+                             if d in ("mon","tue","wed","thu","fri","sat","sun")]
+            break
+    save_jingle_meta(meta)
+    return jsonify({"ok": True})
+
 @app.route("/admin/jingles/<jingle_id>/delete", methods=["POST"])
 @admin_required
 def delete_jingle(jingle_id):
@@ -542,10 +656,20 @@ def delete_jingle(jingle_id):
 @admin_required
 def save_jingle_settings():
     body = request.json or {}
-    cfg = load_jingle_cfg()
+    cfg  = load_jingle_cfg()
     cfg["enabled"]         = bool(body.get("enabled", cfg["enabled"]))
-    cfg["every_n_songs"]   = max(1, int(body.get("every_n_songs",   cfg["every_n_songs"])))
+    cfg["every_n_songs"]   = max(0, int(body.get("every_n_songs",   cfg["every_n_songs"])))
     cfg["every_n_minutes"] = max(0, int(body.get("every_n_minutes", cfg["every_n_minutes"])))
+    new_mode = body.get("rotation_mode")
+    if new_mode and new_mode in ("random", "no_repeat", "sequential", "weighted"):
+        cfg["rotation_mode"] = new_mode
+        # Reset rotation state on mode change
+        with _rotation_lock:
+            rot = load_rotation()
+            rot["seq_index"]  = 0
+            rot["played_ids"] = []
+            rot["last_id"]    = None
+            save_rotation(rot)
     save_jingle_cfg(cfg)
     return jsonify({"ok": True})
 

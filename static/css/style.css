@@ -643,7 +643,58 @@ body {
 .jingle-name-input:hover  { background: #e5e7eb; }
 .jingle-name-input:focus  { background: #fff; outline: 1px solid #d97706; }
 
-.jingle-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.jingle-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+
+/* ── Jingle advanced panel ───────────────────────────────────────────── */
+
+.jingle-item { flex-wrap: wrap; }
+
+.jingle-adv {
+  display: none;
+  width: 100%;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 10px;
+  gap: 12px;
+  flex-direction: column;
+}
+.jingle-adv.jadv-open { display: flex; }
+
+.jadv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.jadv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.jadv-field label { font-size: 12px; font-weight: 600; color: #374151; }
+
+.jadv-days { display: flex; flex-direction: column; gap: 6px; }
+
+.day-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.day-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  user-select: none;
+}
+.day-chip:has(input:checked) { background: #1c2b33; color: #fff; border-color: #1c2b33; }
+.day-chip input { display: none; }
+
+.rotation-hint { margin-top: 4px; font-style: italic; }
 
 /* Buttons extra */
 .btn-warning { background: #f59e0b; color: #fff; }
@@ -652,6 +703,8 @@ body {
 .btn-success:hover { background: #15803d; }
 .btn-danger  { background: #dc2626; color: #fff; }
 .btn-danger:hover  { background: #b91c1c; }
+.btn-info    { background: #6b7280; color: #fff; }
+.btn-info:hover    { background: #4b5563; }
 
 /* ── LOGO ────────────────────────────────────────────────────────────── */
 

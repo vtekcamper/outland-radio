@@ -73,7 +73,7 @@
     </div>
     <div class="card-body">
 
-      <!-- Schedule settings -->
+      <!-- Trigger + rotazione -->
       <div class="jingle-settings">
         <div class="ctrl-row">
           <label class="ctrl-label">Attivi</label>
@@ -90,15 +90,15 @@
         <div class="ctrl-row">
           <label class="ctrl-label">Ogni</label>
           <div class="jingle-freq">
-            <input type="number" id="jingleEveryN" min="1" max="20"
+            <input type="number" id="jingleEveryN" min="0" max="50"
                    value="{{ jingle_cfg.every_n_songs }}"
                    class="input-number" onchange="saveJingleSettings()">
             <span class="freq-label">brani</span>
           </div>
-          <span class="card-hint">0 = disabilitato per brani</span>
+          <span class="card-hint">0 = disabilitato</span>
         </div>
         <div class="ctrl-row">
-          <label class="ctrl-label">Oppure ogni</label>
+          <label class="ctrl-label">Ogni</label>
           <div class="jingle-freq">
             <input type="number" id="jingleEveryMin" min="0" max="120"
                    value="{{ jingle_cfg.every_n_minutes }}"
@@ -107,6 +107,16 @@
           </div>
           <span class="card-hint">0 = solo per brani</span>
         </div>
+        <div class="ctrl-row">
+          <label class="ctrl-label">Rotazione</label>
+          <select id="rotationMode" class="input-number" style="flex:1;max-width:260px" onchange="saveJingleSettings()">
+            <option value="no_repeat"  {% if jingle_cfg.rotation_mode == 'no_repeat'  or not jingle_cfg.get('rotation_mode') %}selected{% endif %}>Casuale senza ripetizione</option>
+            <option value="random"     {% if jingle_cfg.rotation_mode == 'random'     %}selected{% endif %}>Casuale puro</option>
+            <option value="sequential" {% if jingle_cfg.rotation_mode == 'sequential' %}selected{% endif %}>Sequenziale (in ordine)</option>
+            <option value="weighted"   {% if jingle_cfg.rotation_mode == 'weighted'   %}selected{% endif %}>Pesato (per peso assegnato)</option>
+          </select>
+        </div>
+        <p class="card-hint rotation-hint" id="rotationHint"></p>
       </div>
 
       <!-- Upload zone -->
@@ -129,11 +139,51 @@
           <input class="jingle-name-input" value="{{ j.name }}"
                  onchange="renameJingle('{{ j.id }}', this.value)">
           <div class="jingle-actions">
+            <button class="btn btn-sm btn-info" title="Impostazioni avanzate"
+                    onclick="toggleJAdv('{{ j.id }}')">&#9881;</button>
             <button class="btn btn-sm {% if j.enabled %}btn-warning{% else %}btn-success{% endif %}"
                     onclick="toggleJingle('{{ j.id }}', this)">
               {% if j.enabled %}Disabilita{% else %}Abilita{% endif %}
             </button>
             <button class="btn btn-sm btn-danger" onclick="deleteJingle('{{ j.id }}', this)">Elimina</button>
+          </div>
+          <!-- Advanced per-jingle settings -->
+          <div class="jingle-adv" id="jadv-{{ j.id }}">
+            <div class="jadv-grid">
+              <div class="jadv-field">
+                <label>Peso (1–10)</label>
+                <input type="number" min="1" max="10" value="{{ j.weight or 1 }}"
+                       class="input-number" style="width:64px"
+                       onchange="saveJSetting('{{ j.id }}','weight',+this.value)">
+                <span class="card-hint">usato in modalità Pesato</span>
+              </div>
+              <div class="jadv-field">
+                <label>Orario attivo</label>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="time" value="{{ j.time_start or '' }}" class="input-number"
+                         onchange="saveJSetting('{{ j.id }}','time_start',this.value)">
+                  <span>–</span>
+                  <input type="time" value="{{ j.time_end or '' }}" class="input-number"
+                         onchange="saveJSetting('{{ j.id }}','time_end',this.value)">
+                </div>
+                <span class="card-hint">vuoto = sempre attivo</span>
+              </div>
+            </div>
+            <div class="jadv-days">
+              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Giorni attivi</label>
+              <div class="day-chips">
+                {% set jdays = j.days or [] %}
+                {% for day, lbl in [('mon','Lun'),('tue','Mar'),('wed','Mer'),('thu','Gio'),('fri','Ven'),('sat','Sab'),('sun','Dom')] %}
+                <label class="day-chip">
+                  <input type="checkbox" value="{{ day }}"
+                         {% if not jdays or day in jdays %}checked{% endif %}
+                         onchange="saveJDays('{{ j.id }}', this.closest('.day-chips'))">
+                  {{ lbl }}
+                </label>
+                {% endfor %}
+              </div>
+              <span class="card-hint">nessun giorno selezionato = sempre attivo</span>
+            </div>
           </div>
         </div>
         {% endfor %}
@@ -609,6 +659,38 @@ async function uploadJingles(files) {
   }
 }
 
+const ROTATION_HINTS = {
+  no_repeat:  'Casuale senza ripetizione — ogni jingle esce almeno una volta prima che uno si ripeta.',
+  random:     'Casuale puro — ogni estrazione è indipendente, lo stesso jingle può uscire consecutivamente.',
+  sequential: 'Sequenziale — i jingle escono nell\'ordine in cui sono nella lista, in loop.',
+  weighted:   'Pesato — i jingle con peso maggiore escono più spesso. Imposta il peso (1–10) su ogni jingle.',
+};
+
+function updateRotationHint() {
+  const mode = document.getElementById('rotationMode')?.value;
+  const hint = document.getElementById('rotationHint');
+  if (hint && mode) hint.textContent = ROTATION_HINTS[mode] || '';
+}
+
+function toggleJAdv(id) {
+  const el = document.getElementById(`jadv-${id}`);
+  if (!el) return;
+  el.classList.toggle('jadv-open');
+}
+
+async function saveJSetting(id, key, value) {
+  await fetch(`/admin/jingles/${id}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [key]: value }),
+  });
+}
+
+async function saveJDays(id, container) {
+  const days = [...container.querySelectorAll('input[type=checkbox]:checked')].map(i => i.value);
+  await saveJSetting(id, 'days', days);
+}
+
 function addJingleToList(j) {
   const list = document.getElementById('jingleList');
   const div  = document.createElement('div');
@@ -616,11 +698,44 @@ function addJingleToList(j) {
   div.dataset.id = j.id;
   div.innerHTML  = `
     <span class="jingle-icon">&#127897;</span>
-    <input class="jingle-name-input" value="${j.name}"
+    <input class="jingle-name-input" value="${escH(j.name)}"
            onchange="renameJingle('${j.id}', this.value)">
     <div class="jingle-actions">
+      <button class="btn btn-sm btn-info" title="Impostazioni avanzate"
+              onclick="toggleJAdv('${j.id}')">&#9881;</button>
       <button class="btn btn-sm btn-warning" onclick="toggleJingle('${j.id}', this)">Disabilita</button>
       <button class="btn btn-sm btn-danger"  onclick="deleteJingle('${j.id}', this)">Elimina</button>
+    </div>
+    <div class="jingle-adv" id="jadv-${j.id}">
+      <div class="jadv-grid">
+        <div class="jadv-field">
+          <label>Peso (1–10)</label>
+          <input type="number" min="1" max="10" value="1" class="input-number" style="width:64px"
+                 onchange="saveJSetting('${j.id}','weight',+this.value)">
+          <span class="card-hint">usato in modalità Pesato</span>
+        </div>
+        <div class="jadv-field">
+          <label>Orario attivo</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="time" class="input-number" onchange="saveJSetting('${j.id}','time_start',this.value)">
+            <span>–</span>
+            <input type="time" class="input-number" onchange="saveJSetting('${j.id}','time_end',this.value)">
+          </div>
+          <span class="card-hint">vuoto = sempre attivo</span>
+        </div>
+      </div>
+      <div class="jadv-days">
+        <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Giorni attivi</label>
+        <div class="day-chips" id="days-${j.id}">
+          ${['mon','tue','wed','thu','fri','sat','sun'].map((d,i)=>`
+          <label class="day-chip">
+            <input type="checkbox" value="${d}" checked
+                   onchange="saveJDays('${j.id}',this.closest('.day-chips'))">
+            ${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'][i]}
+          </label>`).join('')}
+        </div>
+        <span class="card-hint">nessun giorno selezionato = sempre attivo</span>
+      </div>
     </div>`;
   list.appendChild(div);
 }
@@ -629,9 +744,8 @@ async function toggleJingle(id, btn) {
   await fetch(`/admin/jingles/${id}/toggle`, { method: 'POST' });
   const item    = btn.closest('.jingle-item');
   const enabled = item.classList.toggle('jingle-disabled');
-  // classList.toggle returns true if class was added (= now disabled)
-  btn.textContent  = enabled ? 'Abilita' : 'Disabilita';
-  btn.className    = `btn btn-sm ${enabled ? 'btn-success' : 'btn-warning'}`;
+  btn.textContent = enabled ? 'Abilita' : 'Disabilita';
+  btn.className   = `btn btn-sm ${enabled ? 'btn-success' : 'btn-warning'}`;
 }
 
 async function deleteJingle(id, btn) {
@@ -649,16 +763,22 @@ async function renameJingle(id, name) {
 }
 
 async function saveJingleSettings() {
-  const enabled   = document.getElementById('jingleEnabled').checked;
-  const everyN    = parseInt(document.getElementById('jingleEveryN').value)   || 3;
-  const everyMin  = parseInt(document.getElementById('jingleEveryMin').value) || 0;
+  const enabled  = document.getElementById('jingleEnabled').checked;
+  const everyN   = parseInt(document.getElementById('jingleEveryN').value)   || 0;
+  const everyMin = parseInt(document.getElementById('jingleEveryMin').value) || 0;
+  const rotMode  = document.getElementById('rotationMode').value;
   document.getElementById('jingleEnabledHint').textContent = enabled ? 'Sì' : 'No';
+  updateRotationHint();
   await fetch('/admin/jingles/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled, every_n_songs: everyN, every_n_minutes: everyMin }),
+    body: JSON.stringify({ enabled, every_n_songs: everyN, every_n_minutes: everyMin, rotation_mode: rotMode }),
   });
+  showToast('Impostazioni jingle salvate');
 }
+
+// Init rotation hint
+updateRotationHint();
 
 // Drag-drop upload for jingles
 const jingleZone = document.getElementById('jingleUploadZone');
