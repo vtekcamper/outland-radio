@@ -24,17 +24,24 @@ export default async function adminRoutes(fastify) {
 
   fastify.post('/admin/login', async (req, reply) => {
     const pw = req.body?.password;
-    fastify.log.warn({ bodyKeys: req.body ? Object.keys(req.body) : null, match: pw === ADMIN_PW }, '[login] POST /admin/login');
     if (pw === ADMIN_PW) {
-      req.session.admin = true;
-      return reply.redirect('/admin');
+      // Set a signed cookie that survives across requests without a server-side store
+      return reply
+        .setCookie(fastify.ADMIN_COOKIE, '1', {
+          httpOnly: true,
+          path:     '/',
+          maxAge:   86400,          // 24 h (seconds for setCookie)
+          signed:   true,
+          sameSite: 'lax',
+          secure:   process.env.NODE_ENV === 'production',
+        })
+        .redirect('/admin');
     }
     return reply.redirect('/admin/login?error=1');
   });
 
   fastify.get('/admin/logout', async (req, reply) => {
-    await req.session.destroy();
-    return reply.redirect('/');
+    return reply.clearCookie(fastify.ADMIN_COOKIE, { path: '/' }).redirect('/');
   });
 
   // ── Admin panel ───────────────────────────────────────────────────────────

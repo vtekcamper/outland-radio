@@ -12,7 +12,6 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
-import fastifySession from '@fastify/session';
 import fastifyFormbody from '@fastify/formbody';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyView from '@fastify/view';
@@ -34,19 +33,10 @@ const fastify = Fastify({
 });
 
 // ── Plugins ────────────────────────────────────────────────────────────────
-await fastify.register(fastifyCookie);
+// Cookie plugin with signing secret — used for admin auth cookie
+const COOKIE_SECRET = process.env.FLASK_SECRET_KEY || 'outland-radio-cookie-secret-32chars!!';
+await fastify.register(fastifyCookie, { secret: COOKIE_SECRET });
 await fastify.register(fastifyFormbody);
-
-await fastify.register(fastifySession, {
-  secret:      process.env.FLASK_SECRET_KEY || 'outland-radio-change-in-production-32ch',
-  cookie:      {
-    secure:   process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge:   86400000,
-    sameSite: 'lax',   // ensure cookie is sent on same-site redirects
-  },
-  saveUninitialized: false,
-});
 
 await fastify.register(fastifyMultipart, {
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB per file
@@ -86,14 +76,17 @@ await fastify.register(fastifyStatic, {
 // ── Decorators ─────────────────────────────────────────────────────────────
 
 // Admin guard — preHandler for protected routes
+// Uses a signed cookie instead of server-side sessions (simpler, no store needed)
+const ADMIN_COOKIE = 'adminAuth';
+fastify.decorate('ADMIN_COOKIE', ADMIN_COOKIE);
 fastify.decorate('adminGuard', async function (req, reply) {
-  if (!req.session?.admin) {
+  const raw    = req.cookies?.[ADMIN_COOKIE] ?? '';
+  const result = raw ? req.unsignCookie(raw) : { valid: false };
+  if (!result.valid) {
     if (req.headers.accept?.includes('text/html')) {
-      reply.redirect('/admin/login');
-    } else {
-      reply.status(401).send({ error: 'Unauthorized' });
+      return reply.redirect('/admin/login');
     }
-    return reply;
+    return reply.status(401).send({ error: 'Unauthorized' });
   }
 });
 
