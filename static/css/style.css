@@ -773,6 +773,21 @@ body {
   min-width: 110px;
 }
 
+/* ── ANNOUNCEMENTS ──────────────────────────────────────────────────── */
+
+.ann-times {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ann-time-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ── CSS CUSTOM PROPS (player branding) ─────────────────────────────── */
 
 :root {

@@ -88,6 +88,7 @@ let progressMs = 0;
 let durationMs = 0;
 let progressInterval = null;
 let lastTrackId = null;
+let announcePlaying = false;
 
 window.onSpotifyWebPlaybackSDKReady = () => {
   fetch('/api/token')
@@ -375,6 +376,78 @@ async function playJingle(url, name) {
 }
 
 loadJingleCfg();
+
+// ── Announcement engine ────────────────────────────────────────────────
+// Polls every 30 s. When due: mark played FIRST (prevents re-trigger),
+// then duck Spotify with animateVol and overlay the announcement audio.
+
+async function checkAnnouncements() {
+  if (announcePlaying || jinglePlaying) return;
+  try {
+    const r = await fetch('/api/announce/pending');
+    const d = await r.json();
+    if (!d.id) return;
+    // Mark before playing so server cooldown blocks any concurrent poll
+    await fetch(`/api/announce/${d.id}/played`, { method: 'POST' });
+    playAnnouncement(d.url, d.name, d.duck_volume ?? 0.3);
+  } catch(e) {}
+}
+
+async function playAnnouncement(url, name, duckVol) {
+  if (announcePlaying) return;
+  announcePlaying = true;
+
+  // Shorter fade for announcements — we don't pause Spotify, we duck it
+  const fade      = Math.min((jingleCfg.crossfade_ms ?? 1000) * 0.7, 1000);
+  const sliderVol = document.getElementById('volumeSlider').value / 100;
+  const duckTarget = sliderVol * Math.max(0, Math.min(1, duckVol));
+
+  const audio = new Audio(url);
+  audio.volume = 0;
+
+  const started = await audio.play().then(() => true).catch(() => false);
+  if (!started) { announcePlaying = false; return; }
+
+  // Phase 1: duck Spotify, fade announcement in simultaneously
+  let sdkVol = sliderVol;
+  await Promise.all([
+    animateVol(() => sdkVol,       v => { sdkVol = v; if (player) player.setVolume(v); }, duckTarget, fade),
+    animateVol(() => audio.volume, v => { audio.volume = v; },                             sliderVol,  fade),
+  ]);
+
+  // Phase 2: restore Spotify when announcement is finishing
+  let handledEnd = false;
+  const restoreMusic = async () => {
+    if (handledEnd) return;
+    handledEnd = true;
+    let sdkVol2 = duckTarget;
+    await Promise.all([
+      animateVol(() => audio.volume, v => { audio.volume = v; },                               0,         fade),
+      animateVol(() => sdkVol2,      v => { sdkVol2 = v; if (player) player.setVolume(v); }, sliderVol, fade),
+    ]);
+    announcePlaying = false;
+  };
+
+  // Trigger early fade-out so restore overlaps the tail of the announcement
+  audio.addEventListener('timeupdate', () => {
+    if (!handledEnd && isFinite(audio.duration) && audio.duration > 0) {
+      const remaining = (audio.duration - audio.currentTime) * 1000;
+      if (remaining <= fade + 80) restoreMusic();
+    }
+  });
+  audio.addEventListener('ended', () => restoreMusic());
+  audio.addEventListener('error', () => {
+    handledEnd = true;
+    if (player) player.setVolume(sliderVol);
+    announcePlaying = false;
+  });
+}
+
+// First check after 15 s (let the player stabilise), then every 30 s
+setTimeout(() => {
+  checkAnnouncements();
+  setInterval(checkAnnouncements, 30000);
+}, 15000);
 
 // ── Branding ───────────────────────────────────────────────────────────
 

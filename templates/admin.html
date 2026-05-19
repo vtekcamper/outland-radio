@@ -206,6 +206,141 @@
     </div>
   </div>
 
+  <!-- Annunci Programmati -->
+  <div class="card">
+    <div class="card-head">
+      <h3>Annunci Programmati</h3>
+      <span class="card-hint">Si sovrappongono allo stream abbassando il volume</span>
+    </div>
+    <div class="card-body">
+      <p class="card-note">Carica file audio (annunci di chiusura, promozioni, messaggi). La musica si abbassa, l'annuncio suona, poi il volume torna normale. Il player si sincronizza ogni 30 secondi.</p>
+
+      <!-- Upload zone -->
+      <div class="upload-zone" id="annUploadZone">
+        <input type="file" id="annFileInput" accept=".mp3,.wav,.ogg,.m4a"
+               multiple onchange="uploadAnnounce(this.files)" style="display:none">
+        <div onclick="document.getElementById('annFileInput').click()">
+          <div class="upload-icon">&#128226;</div>
+          <p>Clicca o trascina file MP3/WAV</p>
+          <p class="upload-sub">Annunci, messaggi promozionali, avvisi di chiusura</p>
+        </div>
+      </div>
+      <div id="annUploadMsg"></div>
+
+      <!-- Announce list -->
+      <div class="jingle-list" id="annList">
+        {% for a in announcements %}
+        <div class="jingle-item {% if not a.enabled %}jingle-disabled{% endif %}" data-id="{{ a.id }}">
+          <span class="jingle-icon">&#128226;</span>
+          <input class="jingle-name-input" value="{{ a.name }}"
+                 onchange="renameAnnounce('{{ a.id }}', this.value)">
+          <div class="jingle-actions">
+            <button class="btn btn-sm btn-info" title="Impostazioni"
+                    onclick="toggleAnnAdv('{{ a.id }}')">&#9881;</button>
+            <button class="btn btn-sm {% if a.enabled %}btn-warning{% else %}btn-success{% endif %}"
+                    onclick="toggleAnnounce('{{ a.id }}', this)">
+              {% if a.enabled %}Disabilita{% else %}Abilita{% endif %}
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="deleteAnnounce('{{ a.id }}', this)">Elimina</button>
+          </div>
+          <!-- Advanced settings panel -->
+          <div class="jingle-adv" id="aadv-{{ a.id }}">
+            <div class="jadv-grid">
+              <div class="jadv-field">
+                <label>Volume ducking</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <input type="range" min="0" max="100"
+                         value="{{ (a.duck_volume * 100)|int }}"
+                         class="volume-slider" style="flex:1;max-width:120px"
+                         oninput="this.nextElementSibling.textContent=this.value+'%';saveAnnSetting('{{ a.id }}','duck_volume',this.value/100)">
+                  <span class="vol-val">{{ (a.duck_volume * 100)|int }}%</span>
+                </div>
+                <span class="card-hint">volume musica durante l'annuncio</span>
+              </div>
+              <div class="jadv-field">
+                <label>Tolleranza orario</label>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="number" min="10" max="600" value="{{ a.tolerance_sec }}"
+                         class="input-number" style="width:72px"
+                         onchange="saveAnnSetting('{{ a.id }}','tolerance_sec',+this.value)">
+                  <span class="card-hint">secondi</span>
+                </div>
+                <span class="card-hint">finestra ±sec per orari fissi</span>
+              </div>
+              <div class="jadv-field">
+                <label>Cooldown</label>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="number" min="1" max="1440" value="{{ a.cooldown_min }}"
+                         class="input-number" style="width:72px"
+                         onchange="saveAnnSetting('{{ a.id }}','cooldown_min',+this.value)">
+                  <span class="card-hint">min tra ripetizioni</span>
+                </div>
+              </div>
+              <div class="jadv-field">
+                <label>Intervallo automatico</label>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span class="card-hint">ogni</span>
+                  <input type="number" min="0" max="1440"
+                         value="{{ a.interval_min or 0 }}"
+                         class="input-number" style="width:72px"
+                         onchange="saveAnnSetting('{{ a.id }}','interval_min',+this.value)">
+                  <span class="card-hint">min &nbsp;(0=off)</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
+                  <span class="card-hint">dalle</span>
+                  <input type="time" value="{{ a.interval_start or '' }}" class="input-number"
+                         onchange="saveAnnSetting('{{ a.id }}','interval_start',this.value)">
+                  <span class="card-hint">alle</span>
+                  <input type="time" value="{{ a.interval_end or '' }}" class="input-number"
+                         onchange="saveAnnSetting('{{ a.id }}','interval_end',this.value)">
+                </div>
+              </div>
+            </div>
+
+            <!-- Specific times -->
+            <div class="jadv-field" style="width:100%">
+              <label>Orari specifici</label>
+              <div class="ann-times" id="atimes-{{ a.id }}">
+                {% for t in a.times %}
+                <div class="ann-time-row">
+                  <input type="time" value="{{ t }}" class="input-number"
+                         onchange="updateAnnTime('{{ a.id }}', this)">
+                  <button class="btn btn-sm btn-danger"
+                          onclick="removeAnnTime('{{ a.id }}', this)">✕</button>
+                </div>
+                {% endfor %}
+              </div>
+              <button class="btn btn-sm btn-secondary" style="margin-top:6px"
+                      onclick="addAnnTime('{{ a.id }}')">+ Aggiungi orario</button>
+              <span class="card-hint" style="margin-top:4px;display:block">L'annuncio suona entro ±tolleranza dall'orario indicato</span>
+            </div>
+
+            <!-- Days -->
+            <div class="jadv-days" style="width:100%">
+              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Giorni attivi</label>
+              <div class="day-chips" id="adays-{{ a.id }}">
+                {% set adays = a.days or [] %}
+                {% for day, lbl in [('mon','Lun'),('tue','Mar'),('wed','Mer'),('thu','Gio'),('fri','Ven'),('sat','Sab'),('sun','Dom')] %}
+                <label class="day-chip">
+                  <input type="checkbox" value="{{ day }}"
+                         {% if not adays or day in adays %}checked{% endif %}
+                         onchange="saveAnnDays('{{ a.id }}', this.closest('.day-chips'))">
+                  {{ lbl }}
+                </label>
+                {% endfor %}
+              </div>
+              <span class="card-hint">nessun giorno selezionato = sempre attivo</span>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+        {% if not announcements %}
+        <p class="empty-state" id="annEmpty">Nessun annuncio caricato.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
   <!-- Identità visiva -->
   <div class="card">
     <div class="card-head">
@@ -792,6 +927,197 @@ async function saveJingleSettings() {
 
 // Init rotation hint
 updateRotationHint();
+
+// ── Announce management ────────────────────────────────────────────────
+
+async function uploadAnnounce(files) {
+  const msg = document.getElementById('annUploadMsg');
+  for (const file of files) {
+    msg.innerHTML = `<p>Caricamento <strong>${escH(file.name)}</strong>...</p>`;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await fetch('/admin/announce/upload', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.ok) {
+        msg.innerHTML = `<p class="ok">✓ "${escH(d.name)}" caricato</p>`;
+        addAnnounceToList(d);
+        document.getElementById('annEmpty')?.remove();
+      } else {
+        msg.innerHTML = `<p class="err">Errore: ${escH(d.error)}</p>`;
+      }
+    } catch(e) {
+      msg.innerHTML = `<p class="err">Errore di rete</p>`;
+    }
+  }
+}
+
+function toggleAnnAdv(id) {
+  const el = document.getElementById(`aadv-${id}`);
+  if (el) el.classList.toggle('jadv-open');
+}
+
+async function saveAnnSetting(id, key, value) {
+  await fetch(`/admin/announce/${id}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [key]: value }),
+  });
+}
+
+async function saveAnnDays(id, container) {
+  const days = [...container.querySelectorAll('input[type=checkbox]:checked')].map(i => i.value);
+  await saveAnnSetting(id, 'days', days);
+}
+
+function _getAnnTimes(id) {
+  const container = document.getElementById(`atimes-${id}`);
+  if (!container) return [];
+  return [...container.querySelectorAll('input[type=time]')].map(i => i.value).filter(Boolean);
+}
+
+async function addAnnTime(id) {
+  const container = document.getElementById(`atimes-${id}`);
+  const row = document.createElement('div');
+  row.className = 'ann-time-row';
+  row.innerHTML = `
+    <input type="time" class="input-number"
+           onchange="updateAnnTime('${id}', this)">
+    <button class="btn btn-sm btn-danger"
+            onclick="removeAnnTime('${id}', this)">✕</button>`;
+  container.appendChild(row);
+}
+
+async function updateAnnTime(id) {
+  await saveAnnSetting(id, 'times', _getAnnTimes(id));
+}
+
+async function removeAnnTime(id, btn) {
+  btn.closest('.ann-time-row').remove();
+  await saveAnnSetting(id, 'times', _getAnnTimes(id));
+}
+
+async function toggleAnnounce(id, btn) {
+  await fetch(`/admin/announce/${id}/toggle`, { method: 'POST' });
+  const item    = btn.closest('.jingle-item');
+  const disabled = item.classList.toggle('jingle-disabled');
+  btn.textContent = disabled ? 'Abilita' : 'Disabilita';
+  btn.className   = `btn btn-sm ${disabled ? 'btn-success' : 'btn-warning'}`;
+}
+
+async function renameAnnounce(id, name) {
+  await fetch(`/admin/announce/${id}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+async function deleteAnnounce(id, btn) {
+  if (!confirm('Eliminare questo annuncio?')) return;
+  await fetch(`/admin/announce/${id}/delete`, { method: 'POST' });
+  btn.closest('.jingle-item').remove();
+}
+
+function addAnnounceToList(a) {
+  const list = document.getElementById('annList');
+  const div  = document.createElement('div');
+  div.className  = 'jingle-item';
+  div.dataset.id = a.id;
+  div.innerHTML  = `
+    <span class="jingle-icon">&#128226;</span>
+    <input class="jingle-name-input" value="${escH(a.name)}"
+           onchange="renameAnnounce('${a.id}', this.value)">
+    <div class="jingle-actions">
+      <button class="btn btn-sm btn-info" title="Impostazioni"
+              onclick="toggleAnnAdv('${a.id}')">&#9881;</button>
+      <button class="btn btn-sm btn-warning" onclick="toggleAnnounce('${a.id}', this)">Disabilita</button>
+      <button class="btn btn-sm btn-danger"  onclick="deleteAnnounce('${a.id}', this)">Elimina</button>
+    </div>
+    <div class="jingle-adv" id="aadv-${a.id}">
+      <div class="jadv-grid">
+        <div class="jadv-field">
+          <label>Volume ducking</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="range" min="0" max="100" value="30"
+                   class="volume-slider" style="flex:1;max-width:120px"
+                   oninput="this.nextElementSibling.textContent=this.value+'%';saveAnnSetting('${a.id}','duck_volume',this.value/100)">
+            <span class="vol-val">30%</span>
+          </div>
+          <span class="card-hint">volume musica durante l'annuncio</span>
+        </div>
+        <div class="jadv-field">
+          <label>Tolleranza orario</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" min="10" max="600" value="60"
+                   class="input-number" style="width:72px"
+                   onchange="saveAnnSetting('${a.id}','tolerance_sec',+this.value)">
+            <span class="card-hint">secondi</span>
+          </div>
+          <span class="card-hint">finestra ±sec per orari fissi</span>
+        </div>
+        <div class="jadv-field">
+          <label>Cooldown</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" min="1" max="1440" value="5"
+                   class="input-number" style="width:72px"
+                   onchange="saveAnnSetting('${a.id}','cooldown_min',+this.value)">
+            <span class="card-hint">min tra ripetizioni</span>
+          </div>
+        </div>
+        <div class="jadv-field">
+          <label>Intervallo automatico</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="card-hint">ogni</span>
+            <input type="number" min="0" max="1440" value="0"
+                   class="input-number" style="width:72px"
+                   onchange="saveAnnSetting('${a.id}','interval_min',+this.value)">
+            <span class="card-hint">min &nbsp;(0=off)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
+            <span class="card-hint">dalle</span>
+            <input type="time" class="input-number"
+                   onchange="saveAnnSetting('${a.id}','interval_start',this.value)">
+            <span class="card-hint">alle</span>
+            <input type="time" class="input-number"
+                   onchange="saveAnnSetting('${a.id}','interval_end',this.value)">
+          </div>
+        </div>
+      </div>
+      <div class="jadv-field" style="width:100%">
+        <label>Orari specifici</label>
+        <div class="ann-times" id="atimes-${a.id}"></div>
+        <button class="btn btn-sm btn-secondary" style="margin-top:6px"
+                onclick="addAnnTime('${a.id}')">+ Aggiungi orario</button>
+        <span class="card-hint" style="margin-top:4px;display:block">Suona entro ±tolleranza dall'orario</span>
+      </div>
+      <div class="jadv-days" style="width:100%">
+        <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Giorni attivi</label>
+        <div class="day-chips" id="adays-${a.id}">
+          ${['mon','tue','wed','thu','fri','sat','sun'].map((d,i) => `
+          <label class="day-chip">
+            <input type="checkbox" value="${d}" checked
+                   onchange="saveAnnDays('${a.id}',this.closest('.day-chips'))">
+            ${'Lun Mar Mer Gio Ven Sab Dom'.split(' ')[i]}
+          </label>`).join('')}
+        </div>
+        <span class="card-hint">nessun giorno = sempre attivo</span>
+      </div>
+    </div>`;
+  list.appendChild(div);
+}
+
+// Drag-drop upload for announcements
+const annZone = document.getElementById('annUploadZone');
+if (annZone) {
+  annZone.addEventListener('dragover', e => { e.preventDefault(); annZone.classList.add('drag-over'); });
+  annZone.addEventListener('dragleave', () => annZone.classList.remove('drag-over'));
+  annZone.addEventListener('drop', e => {
+    e.preventDefault();
+    annZone.classList.remove('drag-over');
+    uploadAnnounce(e.dataTransfer.files);
+  });
+}
 
 // Drag-drop upload for jingles
 const jingleZone = document.getElementById('jingleUploadZone');

@@ -36,11 +36,16 @@ JINGLES_DIR    = DATA_DIR / "jingles"
 JINGLE_META    = DATA_DIR / "jingles_meta.json"
 JINGLE_CFG     = DATA_DIR / "jingle_settings.json"
 
-JINGLE_ALLOWED = {"mp3", "wav", "ogg", "m4a"}
+JINGLE_ALLOWED   = {"mp3", "wav", "ogg", "m4a"}
+
+ANNOUNCE_DIR     = DATA_DIR / "announcements"
+ANNOUNCE_META    = DATA_DIR / "announce_meta.json"
+ANNOUNCE_ALLOWED = {"mp3", "wav", "ogg", "m4a"}
 
 def _ensure_dirs():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     JINGLES_DIR.mkdir(parents=True, exist_ok=True)
+    ANNOUNCE_DIR.mkdir(parents=True, exist_ok=True)
 
 _ensure_dirs()
 
@@ -445,6 +450,17 @@ _rotation_lock = threading.Lock()
 
 JINGLE_DEFAULTS = {"weight": 1, "time_start": None, "time_end": None, "days": []}
 
+ANNOUNCE_DEFAULTS = {
+    "duck_volume":    0.3,    # fraction of slider vol during announcement
+    "tolerance_sec":  60,     # ± seconds window for specific-time triggers
+    "times":          [],     # list of "HH:MM" strings
+    "interval_min":   0,      # every N minutes (0 = disabled)
+    "interval_start": None,   # "HH:MM" – start of interval window
+    "interval_end":   None,   # "HH:MM" – end of interval window
+    "days":           [],     # ["mon","tue",...] — empty = all days
+    "cooldown_min":   5,      # minimum minutes between plays
+}
+
 def load_jingle_meta():
     try:
         raw = json.loads(JINGLE_META.read_text())
@@ -540,6 +556,67 @@ def _pick_jingle(active, mode, rot):
     rot["last_id"] = chosen["id"]
     save_rotation(rot)
     return chosen
+
+# ── Announce helpers ─────────────────────────────────────────────────────
+
+def load_announce_meta():
+    try:
+        raw = json.loads(ANNOUNCE_META.read_text())
+    except Exception:
+        return []
+    return [{**ANNOUNCE_DEFAULTS, **a} for a in raw]
+
+def save_announce_meta(meta):
+    ANNOUNCE_META.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+
+def _announce_due(ann):
+    """Return True if this announcement should be triggered right now."""
+    if not ann.get("enabled", True):
+        return False
+    now = datetime.now()
+    # Day-of-week filter
+    days = ann.get("days") or []
+    if days:
+        day_keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        if day_keys[now.weekday()] not in days:
+            return False
+    # Cooldown guard (client marks played BEFORE playing, so this resets immediately)
+    cooldown_min = max(1, ann.get("cooldown_min", 5))
+    last_str = ann.get("last_played_at")
+    if last_str:
+        try:
+            elapsed = (now - datetime.fromisoformat(last_str)).total_seconds() / 60
+            if elapsed < cooldown_min:
+                return False
+        except Exception:
+            pass
+    now_total = now.hour * 60 + now.minute   # minutes since midnight
+    tolerance = ann.get("tolerance_sec", 60)
+    # Specific times (with ± tolerance window)
+    for t in (ann.get("times") or []):
+        try:
+            h, m = map(int, t.split(":"))
+            if abs(now_total - (h * 60 + m)) * 60 <= tolerance:
+                return True
+        except Exception:
+            pass
+    # Interval trigger
+    interval = ann.get("interval_min", 0)
+    if interval > 0:
+        i_start = ann.get("interval_start")
+        i_end   = ann.get("interval_end")
+        now_hm  = now.strftime("%H:%M")
+        in_win  = not (i_start and i_end) or (i_start <= now_hm <= i_end)
+        if in_win:
+            if not last_str:
+                return True   # never played → trigger immediately
+            try:
+                elapsed = (now - datetime.fromisoformat(last_str)).total_seconds() / 60
+                if elapsed >= interval:
+                    return True
+            except Exception:
+                return True
+    return False
 
 # ── Jingle API ────────────────────────────────────────────────────────────
 
@@ -674,18 +751,141 @@ def save_jingle_settings():
     save_jingle_cfg(cfg)
     return jsonify({"ok": True})
 
+# ── Announce API ─────────────────────────────────────────────────────────
+
+@app.route("/api/announce/pending")
+def api_announce_pending():
+    """Return the first announcement that should play right now, or {id: null}."""
+    meta = load_announce_meta()
+    for ann in meta:
+        if _announce_due(ann):
+            return jsonify({
+                "id":          ann["id"],
+                "url":         f"/announce/files/{ann['filename']}",
+                "name":        ann["name"],
+                "duck_volume": ann.get("duck_volume", 0.3),
+            })
+    return jsonify({"id": None})
+
+@app.route("/api/announce/<ann_id>/played", methods=["POST"])
+def api_announce_played(ann_id):
+    """Mark an announcement as played now (called by client BEFORE playing)."""
+    meta = load_announce_meta()
+    for ann in meta:
+        if ann["id"] == ann_id:
+            ann["last_played_at"] = datetime.now().isoformat()
+            break
+    save_announce_meta(meta)
+    return jsonify({"ok": True})
+
+@app.route("/announce/files/<filename>")
+def serve_announce(filename):
+    return send_from_directory(str(ANNOUNCE_DIR), filename)
+
+@app.route("/admin/announce/upload", methods=["POST"])
+@admin_required
+def upload_announce():
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "Nessun file"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"ok": False, "error": "Nome file mancante"}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ANNOUNCE_ALLOWED:
+        return jsonify({"ok": False, "error": "Formato non supportato (usa MP3, WAV, OGG)"}), 400
+    uid      = uuid.uuid4().hex[:8]
+    filename = f"{uid}_{secure_filename(f.filename)}"
+    f.save(str(ANNOUNCE_DIR / filename))
+    meta = load_announce_meta()
+    name = Path(f.filename).stem.replace("_", " ").replace("-", " ")
+    entry = {**ANNOUNCE_DEFAULTS, "id": uid, "filename": filename,
+             "name": name, "enabled": True, "last_played_at": None}
+    meta.append(entry)
+    save_announce_meta(meta)
+    return jsonify({"ok": True, "id": uid, "name": name})
+
+@app.route("/admin/announce/<ann_id>/toggle", methods=["POST"])
+@admin_required
+def toggle_announce(ann_id):
+    meta = load_announce_meta()
+    for ann in meta:
+        if ann["id"] == ann_id:
+            ann["enabled"] = not ann.get("enabled", True)
+            break
+    save_announce_meta(meta)
+    return jsonify({"ok": True})
+
+@app.route("/admin/announce/<ann_id>/rename", methods=["POST"])
+@admin_required
+def rename_announce(ann_id):
+    name = (request.json or {}).get("name", "").strip()
+    if not name:
+        return jsonify({"ok": False}), 400
+    meta = load_announce_meta()
+    for ann in meta:
+        if ann["id"] == ann_id:
+            ann["name"] = name
+            break
+    save_announce_meta(meta)
+    return jsonify({"ok": True})
+
+@app.route("/admin/announce/<ann_id>/settings", methods=["POST"])
+@admin_required
+def announce_settings(ann_id):
+    body = request.json or {}
+    meta = load_announce_meta()
+    for ann in meta:
+        if ann["id"] == ann_id:
+            if "duck_volume" in body:
+                ann["duck_volume"] = max(0.0, min(1.0, float(body["duck_volume"])))
+            if "tolerance_sec" in body:
+                ann["tolerance_sec"] = max(10, min(600, int(body["tolerance_sec"])))
+            if "times" in body:
+                ann["times"] = [t for t in body["times"]
+                                if isinstance(t, str) and len(t) == 5 and ":" in t]
+            if "interval_min" in body:
+                ann["interval_min"] = max(0, int(body["interval_min"]))
+            if "interval_start" in body:
+                ann["interval_start"] = body["interval_start"] or None
+            if "interval_end" in body:
+                ann["interval_end"] = body["interval_end"] or None
+            if "cooldown_min" in body:
+                ann["cooldown_min"] = max(1, int(body["cooldown_min"]))
+            if "days" in body:
+                ann["days"] = [d for d in body["days"]
+                               if d in ("mon","tue","wed","thu","fri","sat","sun")]
+            break
+    save_announce_meta(meta)
+    return jsonify({"ok": True})
+
+@app.route("/admin/announce/<ann_id>/delete", methods=["POST"])
+@admin_required
+def delete_announce(ann_id):
+    meta = load_announce_meta()
+    target = next((a for a in meta if a["id"] == ann_id), None)
+    if target:
+        try:
+            (ANNOUNCE_DIR / target["filename"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+        meta = [a for a in meta if a["id"] != ann_id]
+        save_announce_meta(meta)
+    return jsonify({"ok": True})
+
 # ── Admin routes ──────────────────────────────────────────────────────────
 
 @app.route("/admin")
 @admin_required
 def admin():
-    jingles    = load_jingle_meta()
-    jingle_cfg = load_jingle_cfg()
-    branding   = load_branding()
-    schedule   = load_schedule()
+    jingles       = load_jingle_meta()
+    jingle_cfg    = load_jingle_cfg()
+    branding      = load_branding()
+    schedule      = load_schedule()
+    announcements = load_announce_meta()
     return render_template("admin.html",
                            jingles=jingles, jingle_cfg=jingle_cfg,
-                           branding=branding, schedule=schedule)
+                           branding=branding, schedule=schedule,
+                           announcements=announcements)
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
