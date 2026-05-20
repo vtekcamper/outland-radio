@@ -282,30 +282,45 @@ setInterval(pollNowPlaying, 20_000);
  * audioCtx.currentTime, so they run even when this tab is in the background.
  * The sfxGain AudioParam uses linearRampToValueAtTime for hardware-precise fading.
  */
-function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
+async function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
   // duckTarget === null  → jingle mode (pause Spotify)
   // duckTarget === 0..1  → announce mode (duck Spotify to fraction of slider)
   if (jinglePlaying || announcePlaying) return;
 
-  const isJingle  = duckTarget === null;
-  if (isJingle)  jinglePlaying   = true;
-  else           announcePlaying = true;
+  const isJingle = duckTarget === null;
+  if (isJingle) jinglePlaying = true; else announcePlaying = true;
 
   ensureAudioCtx();
 
-  const fadeS     = Math.max(0, crossfade_ms) / 1000;
-  const now       = audioCtx.currentTime;
-  const duckVol   = isJingle ? 0 : sliderVol * Math.max(0, Math.min(1, duckTarget));
+  // Ensure AudioContext is running (it may be suspended on some browsers)
+  if (audioCtx.state !== 'running') {
+    try { await audioCtx.resume(); } catch {}
+  }
 
-  const audio     = new Audio(src);
-  audio.crossOrigin = 'anonymous';
-  const source    = audioCtx.createMediaElementSource(audio);
-  source.connect(sfxGain);
+  // ── Pre-fetch and decode BEFORE touching Spotify volume ──────────────
+  // Using AudioBufferSourceNode instead of HTMLAudioElement.play():
+  //  • AudioBufferSourceNode.start() has NO autoplay restrictions
+  //  • HTMLAudioElement.play() from an SSE handler (no user gesture) gets
+  //    blocked by browsers, leaving Spotify silenced with no audio at all
+  let audioBuffer;
+  try {
+    const resp = await fetch(src);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const arrayBuf = await resp.arrayBuffer();
+    audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+  } catch (err) {
+    console.warn('[overlay] Audio load failed, aborting:', err);
+    if (isJingle) jinglePlaying = false; else announcePlaying = false;
+    return;  // bail out — Spotify was never touched
+  }
 
-  // ── Phase 1: fade SFX in, duck/pause Spotify ──────────────────────────
+  // ── Phase 1: audio ready → duck/pause Spotify, then start SFX ────────
+  const fadeS   = Math.max(0, crossfade_ms) / 1000;
+  const duckVol = isJingle ? 0 : sliderVol * Math.max(0, Math.min(1, duckTarget));
+  const now     = audioCtx.currentTime;
+
   sfxGain.gain.cancelScheduledValues(now);
   sfxGain.gain.setValueAtTime(0, now);
-
   if (fadeS > 0) {
     sfxGain.gain.linearRampToValueAtTime(1.0, now + fadeS);
     scheduleSpotifyRamp(sliderVol, duckVol, now, fadeS);
@@ -313,21 +328,18 @@ function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
     sfxGain.gain.setValueAtTime(1.0, now);
   }
 
+  // Start playback via AudioBufferSourceNode (works in any running AudioContext)
+  const bufSrc = audioCtx.createBufferSource();
+  bufSrc.buffer = audioBuffer;
+  bufSrc.connect(sfxGain);
+  bufSrc.start(now);
+
+  // For jingles: pause Spotify after the fade-in completes
   if (isJingle) {
-    // Brief delay so the fade starts before Spotify is paused
     setTimeout(() => {
-      if (player) { player.setVolume(0); player.pause(); player.setVolume(sliderVol); }
+      if (player) { player.setVolume(0); player.pause(); }
     }, fadeS * 1000);
   }
-
-  // Start playback
-  audio.play().catch(() => {
-    if (isJingle)  { jinglePlaying   = false; if (player) player.resume(); }
-    else           { announcePlaying = false; }
-    sfxGain.gain.cancelScheduledValues(audioCtx.currentTime);
-    sfxGain.gain.setValueAtTime(0, audioCtx.currentTime);
-    if (player) player.setVolume(sliderVol);
-  });
 
   // ── Phase 2: restore ──────────────────────────────────────────────────
   let restored = false;
@@ -336,16 +348,14 @@ function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
     if (restored) return;
     restored = true;
 
-    const endNow  = audioCtx.currentTime;
+    const endNow   = audioCtx.currentTime;
     const restoreS = fadeS > 0 ? fadeS : 0.05;
 
-    // Fade SFX out
     sfxGain.gain.cancelScheduledValues(endNow);
     sfxGain.gain.setValueAtTime(sfxGain.gain.value, endNow);
     sfxGain.gain.linearRampToValueAtTime(0, endNow + restoreS);
 
     if (isJingle && player) {
-      // Resume Spotify silently then ramp up
       player.setVolume(0);
       await player.resume();
       scheduleSpotifyRamp(0, sliderVol, endNow, restoreS);
@@ -356,27 +366,16 @@ function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
     setTimeout(() => {
       sfxGain.gain.setValueAtTime(0, audioCtx.currentTime);
       if (player) player.setVolume(sliderVol);
-      if (isJingle)  jinglePlaying   = false;
-      else           announcePlaying = false;
+      if (isJingle) jinglePlaying = false; else announcePlaying = false;
     }, (restoreS + 0.1) * 1000);
   }
 
-  // Trigger early restore when remaining time ≤ fadeS (only for long files)
-  const earlyFadeThreshold = fadeS * 2000 + 500;   // ms
-  audio.addEventListener('timeupdate', () => {
-    if (restored || !isFinite(audio.duration) || audio.duration === 0) return;
-    if (audio.duration * 1000 <= earlyFadeThreshold) return;  // too short → let 'ended' handle it
-    const remaining = (audio.duration - audio.currentTime) * 1000;
-    if (remaining <= fadeS * 1000 + 80) restore();
-  });
-  audio.addEventListener('ended', () => restore());
-  audio.addEventListener('error', () => {
-    restored = true;
-    sfxGain.gain.setValueAtTime(0, audioCtx.currentTime);
-    if (player) { if (isJingle) player.resume(); player.setVolume(sliderVol); }
-    if (isJingle)  jinglePlaying   = false;
-    else           announcePlaying = false;
-  });
+  // Early restore when approaching end (only for files longer than 2×fade + 0.5s)
+  const earlyFadeThresholdSec = fadeS * 2 + 0.5;
+  if (audioBuffer.duration > earlyFadeThresholdSec) {
+    setTimeout(restore, (audioBuffer.duration - fadeS) * 1000);
+  }
+  bufSrc.onended = () => restore();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
