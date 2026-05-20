@@ -42,11 +42,10 @@ function fireJingle() {
   if (!jingle) return;
 
   broadcast({
-    type:         'JINGLE',
+    type:         'JINGLE_QUEUED',   // client plays this at the next track boundary
     src:          `/jingles/files/${jingle.filename}`,
     name:         jingle.name,
     crossfade_ms: cfg.crossfade_ms ?? 1500,
-    scheduledAt:  Date.now() / 1000 + 1.5,   // 1.5s buffer for SSE propagation
   });
 }
 

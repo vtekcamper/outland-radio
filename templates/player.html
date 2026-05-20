@@ -96,6 +96,7 @@ let lastTrackId      = null;
 
 let jinglePlaying    = false;
 let announcePlaying  = false;
+let pendingJingle    = null;   // queued jingle waiting for the next track boundary
 
 let jingleCfg = { enabled: true, every_n_songs: 3, every_n_minutes: 0,
                   rotation_mode: 'no_repeat', crossfade_ms: 1500 };
@@ -180,8 +181,17 @@ function initPlayer(token) {
     if (track) {
       if (track.id && track.id !== lastTrackId) {
         if (lastTrackId !== null) {
-          // Notify server about track change (server handles jingle trigger logic)
+          // Notify server about track change (server handles jingle song-count logic)
           fetch('/api/track-changed', { method: 'POST' }).catch(() => {});
+
+          // If a jingle is queued from a previous song, play it NOW between tracks
+          if (pendingJingle && !jinglePlaying && !announcePlaying) {
+            const jingle = pendingJingle;
+            pendingJingle = null;
+            // Silence and pause the new track instantly, then hand off to playOverlay
+            if (player) { player.setVolume(0); player.pause(); }
+            playOverlay({ ...jingle, duckTarget: null, preDucked: true });
+          }
         }
         lastTrackId = track.id;
       }
@@ -282,9 +292,11 @@ setInterval(pollNowPlaying, 20_000);
  * audioCtx.currentTime, so they run even when this tab is in the background.
  * The sfxGain AudioParam uses linearRampToValueAtTime for hardware-precise fading.
  */
-async function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }) {
+async function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null, preDucked = false }) {
   // duckTarget === null  → jingle mode (pause Spotify)
   // duckTarget === 0..1  → announce mode (duck Spotify to fraction of slider)
+  // preDucked  === true  → Spotify already silenced/paused by caller (between-songs jingle):
+  //                        skip volume ramp & pause, go straight to jingle audio
   if (jinglePlaying || announcePlaying) return;
 
   const isJingle = duckTarget === null;
@@ -323,7 +335,8 @@ async function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }
   sfxGain.gain.setValueAtTime(0, now);
   if (fadeS > 0) {
     sfxGain.gain.linearRampToValueAtTime(1.0, now + fadeS);
-    scheduleSpotifyRamp(sliderVol, duckVol, now, fadeS);
+    // preDucked = Spotify already silenced/paused (between-songs trigger) — skip ramp
+    if (!preDucked) scheduleSpotifyRamp(sliderVol, duckVol, now, fadeS);
   } else {
     sfxGain.gain.setValueAtTime(1.0, now);
   }
@@ -334,8 +347,8 @@ async function playOverlay({ src, name, crossfade_ms = 1500, duckTarget = null }
   bufSrc.connect(sfxGain);
   bufSrc.start(now);
 
-  // For jingles: pause Spotify after the fade-in completes
-  if (isJingle) {
+  // For jingles: pause Spotify after fade-in (skip if already paused by caller)
+  if (isJingle && !preDucked) {
     setTimeout(() => {
       if (player) { player.setVolume(0); player.pause(); }
     }, fadeS * 1000);
@@ -389,13 +402,19 @@ function connectSSE() {
     try { event = JSON.parse(e.data); } catch { return; }
 
     switch (event.type) {
+      case 'JINGLE_QUEUED':
+        // Store jingle and play it at the next natural track boundary
+        pendingJingle = event;
+        break;
+
       case 'JINGLE':
+        // Legacy / direct play (e.g. manual trigger) — plays immediately mid-song
         if (jinglePlaying || announcePlaying) return;
         playOverlay({
           src:          event.src,
           name:         event.name,
           crossfade_ms: event.crossfade_ms ?? 1500,
-          duckTarget:   null,   // jingle mode
+          duckTarget:   null,
         });
         break;
 
